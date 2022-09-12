@@ -292,6 +292,7 @@ export class MathfieldPrivate implements GlobalContext, Mathfield {
     // events as this has the side effect of triggering the OS virtual keyboard
     // which we want to avoid
     let markup = "<span class='ML__textarea'>";
+    console.log("isTouchCapable:",isTouchCapable())
     if (isTouchCapable())
       markup += `<span class='ML__textarea__textarea' tabindex="-1" role="textbox"></span>`;
     else {

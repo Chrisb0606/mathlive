@@ -14,6 +14,7 @@ export function throwIfNotInBrowser(): void {
 }
 
 export function isTouchCapable(): boolean {
+  console.log(" isTouchCapable isBrowser",isBrowser(),"matchMedia:",window.matchMedia?.('(any-pointer: coarse)').matches)
   return (
     (isBrowser() && window.matchMedia?.('(any-pointer: coarse)').matches) ??
     false
