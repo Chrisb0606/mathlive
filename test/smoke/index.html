@@ -16,10 +16,10 @@
     </header>
     <main>
       <math-field id="mf" read-only>{123}abc</math-field>
-      <!-- <math-field id="mf"
+      <math-field id="mf"
         >{\sqrt{\sum_{n=1}^\infty {\frac{10}{n^4}}}} = {\int_0^\infty \frac{2x
         dx}{e^x-1}} = \frac{\pi^2}{3} \in {\mathbb R}</math-field
-      > -->
+      >
 
       <h2 style="margin-top: 1em">Selection</h2>
       <div class="output" id="selection"></div>
@@ -47,6 +47,13 @@
         // makeSharedVirtualKeyboard,
         MathfieldElement,
       } from '/dist/mathlive.mjs';
+
+      var mf2 = new MathfieldElement({
+        defaultMode: 'math',
+        virtualKeyboardMode: 'onfocus', //onfocus
+        virtualKeyboardTheme: 'material',
+      });
+      document.body.insertBefore(mf2, document.body.firstChild);
 
       // const HIGH_SCHOOL_KEYBOARD_LAYER = {
       //   'high-school-layer': {

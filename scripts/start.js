@@ -33,10 +33,10 @@ build({
         console.log(` 🚀 Build Complete`);
         return;
       }
-      const url = `http://localhost:8080/test/smoke/`;
+      const url = `http://localhost:8082/test/smoke/`;
       console.log(` 🚀 Server ready:\u001b[1;35m ${url}\u001b[0m`);
       exec(
-        "npx http-server . -s -c-1 --cors='*' --port 8080",
+        "npx http-server . -s -c-1 --cors='*' --port 8082",
         (error, stdout, stderr) => {
           if (error) {
             throw Error(error);
