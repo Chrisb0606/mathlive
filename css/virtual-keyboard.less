@@ -731,9 +731,8 @@
 @media (prefers-color-scheme: dark) {
   body:not([theme='light']) .ML__keyboard {
     --hue: 206;
-    --keyboard-background: hsl(206, 19%, 38%);
-    --keyboard-background: hsl(212, 19%, 38%);
-    --keyboard-background: hsl(var(--hue), 19%, 38%);
+    --keyboard-background: red;
+
     --keyboard-text: #f0f0f0;
     --keyboard-text-active: hsl(var(--hue), 100%, 60%);
     --keyboard-background-border: hsl(0, 0%, 20%);
@@ -755,7 +754,7 @@
 /* Same as the media query, but with a class */
 body[theme='dark'] .ML__keyboard {
   --hue: 206;
-  --keyboard-background: hsl(var(--hue), 19%, 38%);
+  --keyboard-background: green;
   --keyboard-text: #f0f0f0;
   --keyboard-text-active: hsl(var(--hue), 100%, 60%);
   --keyboard-background-border: hsl(0, 0%, 20%);
