@@ -775,7 +775,7 @@ body[theme='dark'] .ML__keyboard {
 
 /* The 'material' theme for the virtual keyboard */
 div.ML__keyboard.material {
-  --keyboard-background: rgba(209, 213, 217, 0.9);
+  --keyboard-background: purple;
   --keyboard-background-border: #ddd;
   --keycap-background: transparent;
   --keycap-background-active: #cccfd1;
@@ -941,7 +941,7 @@ div.ML__keyboard.material {
 @media (prefers-color-scheme: dark) {
   body:not([theme='light']) div.ML__keyboard.material {
     --hue: 198;
-    --keyboard-background: hsl(var(--hue), 19%, 18%);
+    --keyboard-background: black;
     --keyboard-text: #d4d6d7;
     --keyboard-text-active: @material-primary;
     --keyboard-background-border: hsl(0, 0%, 20%);
@@ -964,7 +964,7 @@ div.ML__keyboard.material {
 }
 body[theme='dark'] div.ML__keyboard.material {
   --hue: 198;
-  --keyboard-background: hsl(var(--hue), 19%, 18%);
+  --keyboard-background: blue;
   --keyboard-text: #d4d6d7;
   --keyboard-text-active: @material-primary;
   --keyboard-background-border: hsl(0, 0%, 20%);
