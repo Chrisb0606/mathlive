@@ -15,9 +15,7 @@
 
 .ML__keyboard {
   --hue: 206;
-  //--keyboard-background: rgba(209, 213, 217, 0.97);
-  --keyboard-background: yellow;
-
+  --keyboard-background: rgba(209, 213, 217, 0.97);
   --keyboard-text: #000;
   --keyboard-text-active: var(--primary, hsl(var(--hue), 40%, 50%));
   --keyboard-background-border: #ddd;
@@ -731,8 +729,9 @@
 @media (prefers-color-scheme: dark) {
   body:not([theme='light']) .ML__keyboard {
     --hue: 206;
-    --keyboard-background: red;
-
+    --keyboard-background: hsl(206, 19%, 38%);
+    --keyboard-background: hsl(212, 19%, 38%);
+    --keyboard-background: hsl(var(--hue), 19%, 38%);
     --keyboard-text: #f0f0f0;
     --keyboard-text-active: hsl(var(--hue), 100%, 60%);
     --keyboard-background-border: hsl(0, 0%, 20%);
@@ -754,7 +753,7 @@
 /* Same as the media query, but with a class */
 body[theme='dark'] .ML__keyboard {
   --hue: 206;
-  --keyboard-background: green;
+  --keyboard-background: hsl(var(--hue), 19%, 38%);
   --keyboard-text: #f0f0f0;
   --keyboard-text-active: hsl(var(--hue), 100%, 60%);
   --keyboard-background-border: hsl(0, 0%, 20%);
@@ -775,7 +774,7 @@ body[theme='dark'] .ML__keyboard {
 
 /* The 'material' theme for the virtual keyboard */
 div.ML__keyboard.material {
-  --keyboard-background: purple;
+  --keyboard-background: rgba(209, 213, 217, 0.9);
   --keyboard-background-border: #ddd;
   --keycap-background: transparent;
   --keycap-background-active: #cccfd1;
@@ -941,7 +940,7 @@ div.ML__keyboard.material {
 @media (prefers-color-scheme: dark) {
   body:not([theme='light']) div.ML__keyboard.material {
     --hue: 198;
-    --keyboard-background: black;
+    --keyboard-background: hsl(var(--hue), 19%, 18%);
     --keyboard-text: #d4d6d7;
     --keyboard-text-active: @material-primary;
     --keyboard-background-border: hsl(0, 0%, 20%);
@@ -964,7 +963,7 @@ div.ML__keyboard.material {
 }
 body[theme='dark'] div.ML__keyboard.material {
   --hue: 198;
-  --keyboard-background: blue;
+  --keyboard-background: hsl(var(--hue), 19%, 18%);
   --keyboard-text: #d4d6d7;
   --keyboard-text-active: @material-primary;
   --keyboard-background-border: hsl(0, 0%, 20%);
