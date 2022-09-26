@@ -94,20 +94,20 @@
 
 /* This is the actual field content (formula) */
 .ML__content {
-  //MODIF CB : disable flex to allow alignement inside the field
+  //MODIF CB : disable flex to allow alignment inside the field
   // display: flex;
   // align-items: center;
   align-self: center;
   position: relative;
   overflow: hidden;
   width: 100%;
-}
-.question.statement .ML__content {
-  //MODIF CB : remove padding top and bottom
-  padding-top: 2px;
-  padding-right: 4px;
-  padding-bottom: 2px;
-  padding-left: 2px; // change third into 2px to align cursor on the h middle
+  .question.statement & {
+    //MODIF CB : remove padding top and bottom
+    padding-top: 2px;
+    padding-right: 4px;
+    padding-bottom: 2px;
+    padding-left: 2px; // change third into 2px to align cursor on the h middle
+  }
 }
 
 .ML__virtual-keyboard-toggle {
