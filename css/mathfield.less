@@ -97,14 +97,17 @@
   //MODIF CB : disable flex to allow alignement inside the field
   // display: flex;
   // align-items: center;
-  //MODIF CB : remove padding top and bottom
-  padding: 2px 4px 4px 0px; // change third into 2px to align cursor on the h middle
-
   align-self: center;
   position: relative;
   overflow: hidden;
-
   width: 100%;
+}
+.ML__content .question.statement {
+  //MODIF CB : remove padding top and bottom
+  padding-top: 2px;
+  padding-right: 4px;
+  padding-bottom: 2px;
+  padding-left: 2px; // change third into 2px to align cursor on the h middle
 }
 
 .ML__virtual-keyboard-toggle {
