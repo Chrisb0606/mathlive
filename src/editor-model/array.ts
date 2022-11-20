@@ -8,6 +8,7 @@ import { register as registerCommand } from '../editor/commands';
 import type { ModelPrivate } from './model-private';
 import { contentDidChange, contentWillChange } from './listeners';
 import { arrayIndex, arrayCell } from './array-utils';
+import { ArrayAtom } from '../core-atoms/array';
 export * from './array-utils';
 
 /**
@@ -114,62 +115,60 @@ export function arrayFirstCellByRow(array: Atom[][][]): string {
  * Internal primitive to add a column/row in a matrix
  */
 function addCell(
-  _model: ModelPrivate,
-  _where: 'after row' | 'before row' | 'after column' | 'before column'
+  model: ModelPrivate,
+  where: 'after row' | 'before row' | 'after column' | 'before column'
 ): void {
-  // This command is only applicable if we're in an array
-  // const parent = model.parent;
-  // if (parent && parent.type === 'array' && isArray(parent.array)) {
-  //     const relation = model.relation;
-  //     if (parent.array) {
-  //         const colRow = arrayColRow(parent.array, relation);
-  //         if (where === 'after row' || where === 'before row') {
-  //             // Insert a row
-  //             colRow.col = 0;
-  //             colRow.row = colRow.row + (where === 'after row' ? 1 : 0);
-  //             parent.array.splice(colRow.row, 0, [[]]);
-  //         } else {
-  //             // Insert a column
-  //             colRow.col += where === 'after column' ? 1 : 0;
-  //             parent.array[colRow.row].splice(colRow.col, 0, []);
-  //         }
-  //         const cellIndex = arrayIndex(parent.array, colRow);
-  //         model.path.pop();
-  //         model.path.push({
-  //             relation: ('cell' + cellIndex.toString()) as Relation,
-  //             offset: 0,
-  //         });
-  //         model.insertFirstAtom();
-  //     }
-  // }
-}
+  // This command is only applicable if we're in an ArrayAtom
+  let atom = model.at(model.position);
 
-export function convertParentToArray(_model: ModelPrivate): void {
-  // Const parent = model.parent;
-  // if (parent.type === 'leftright') {
-  //     parent.type = 'array';
-  //     const envName =
-  //         { '(': 'pmatrix', '\\lbrack': 'bmatrix', '\\lbrace': 'cases' }[
-  //             parent.leftDelim
-  //         ] ?? 'matrix';
-  //     const env = getEnvironmentDefinition(envName);
-  //     const array = [[parent.branches.body]];
-  //     Object.assign(parent, env.parser(envName, [], array));
-  //     parent.mode = getAnchorMode(model);
-  //     parent.environmentName = envName;
-  //     parent.array = array;
-  //     parent.rowGaps = [0];
-  //     delete parent.branches.body;
-  //     model.path[model.path.length - 1].relation = 'cell0' as Relation;
-  // }
-  // Note: could also be a group, or we could be a subscript or an
-  // underscript (for multi-valued conditions on a \sum, for example)
-  // Or if at root, this could be a 'align*' environment
+  while (
+    atom &&
+    !(Array.isArray(atom.treeBranch) && atom.parent instanceof ArrayAtom)
+  )
+    atom = atom.parent!;
+
+  if (Array.isArray(atom?.treeBranch) && atom?.parent instanceof ArrayAtom) {
+    const arrayAtom = atom.parent;
+    let pos: number;
+    switch (where) {
+      case 'after row':
+        arrayAtom.addRowAfter(atom.treeBranch[0]);
+        pos = model.offsetOf(arrayAtom.getCell(atom.treeBranch[0] + 1, 0)![0]);
+        break;
+
+      case 'after column':
+        if (arrayAtom.maxColumns <= arrayAtom.colCount) {
+          model.announce('plonk');
+          return;
+        }
+        arrayAtom.addColumnAfter(atom.treeBranch[1]);
+        pos = model.offsetOf(
+          arrayAtom.getCell(atom.treeBranch[0], atom.treeBranch[1] + 1)![0]
+        );
+        break;
+
+      case 'before row':
+        arrayAtom.addRowBefore(atom.treeBranch[0]);
+        pos = model.offsetOf(arrayAtom.getCell(atom.treeBranch[0] - 1, 0)![0]);
+        break;
+
+      case 'before column':
+        if (arrayAtom.maxColumns <= arrayAtom.colCount) {
+          model.announce('plonk');
+          return;
+        }
+        arrayAtom.addColumnBefore(atom.treeBranch[1]);
+        pos = model.offsetOf(
+          arrayAtom.getCell(atom.treeBranch[0], atom.treeBranch[1] - 1)![0]
+        );
+        break;
+    }
+    model.setSelection(pos, pos + 1);
+  }
 }
 
 export function addRowAfter(model: ModelPrivate): boolean {
   if (!contentWillChange(model, { inputType: 'insertText' })) return false;
-  convertParentToArray(model);
   addCell(model, 'after row');
   contentDidChange(model, { inputType: 'insertText' });
   return true;
@@ -177,7 +176,6 @@ export function addRowAfter(model: ModelPrivate): boolean {
 
 export function addRowBefore(model: ModelPrivate): boolean {
   if (!contentWillChange(model, { inputType: 'insertText' })) return false;
-  convertParentToArray(model);
   addCell(model, 'before row');
   contentDidChange(model, { inputType: 'insertText' });
   return true;
@@ -185,7 +183,6 @@ export function addRowBefore(model: ModelPrivate): boolean {
 
 export function addColumnAfter(model: ModelPrivate): boolean {
   if (!contentWillChange(model, { inputType: 'insertText' })) return false;
-  convertParentToArray(model);
   addCell(model, 'after column');
   contentDidChange(model, { inputType: 'insertText' });
   return true;
@@ -193,9 +190,66 @@ export function addColumnAfter(model: ModelPrivate): boolean {
 
 export function addColumnBefore(model: ModelPrivate): boolean {
   if (!contentWillChange(model, { inputType: 'insertText' })) return false;
-  convertParentToArray(model);
   addCell(model, 'before column');
   contentDidChange(model, { inputType: 'insertText' });
+  return true;
+}
+
+/**
+ * Internal primitive to remove a column/row in a matrix
+ */
+function removeCell(model: ModelPrivate, where: 'row' | 'column'): void {
+  // This command is only applicable if we're in an ArrayAtom
+  let atom = model.at(model.position);
+
+  while (
+    atom &&
+    !(Array.isArray(atom.treeBranch) && atom.parent instanceof ArrayAtom)
+  )
+    atom = atom.parent!;
+
+  if (Array.isArray(atom?.treeBranch) && atom?.parent instanceof ArrayAtom) {
+    const arrayAtom = atom.parent;
+    const treeBranch = atom.treeBranch;
+    let pos: number | undefined;
+    switch (where) {
+      case 'row':
+        if (arrayAtom.rowCount > 1) {
+          arrayAtom.removeRow(treeBranch[0]);
+          const cell = arrayAtom.getCell(
+            Math.max(0, treeBranch[0] - 1),
+            treeBranch[1]
+          )!;
+          pos = model.offsetOf(cell[cell.length - 1]);
+        }
+        break;
+
+      case 'column':
+        if (arrayAtom.colCount > arrayAtom.minColumns) {
+          arrayAtom.removeColumn(treeBranch[1]);
+          const cell = arrayAtom.getCell(
+            treeBranch[0],
+            Math.max(0, treeBranch[1] - 1)
+          )!;
+          pos = model.offsetOf(cell[cell.length - 1]);
+        }
+        break;
+    }
+    if (pos) model.setPositionHandlingPlaceholder(pos);
+  }
+}
+
+export function removeRow(model: ModelPrivate): boolean {
+  if (!contentWillChange(model, { inputType: 'deleteContent' })) return false;
+  removeCell(model, 'row');
+  contentDidChange(model, { inputType: 'deleteContent' });
+  return true;
+}
+
+export function removeColumn(model: ModelPrivate): boolean {
+  if (!contentWillChange(model, { inputType: 'deleteContent' })) return false;
+  removeCell(model, 'column');
+  contentDidChange(model, { inputType: 'deleteContent' });
   return true;
 }
 
@@ -205,6 +259,8 @@ registerCommand(
     addColumnAfter,
     addRowBefore,
     addColumnBefore,
+    removeRow,
+    removeColumn,
   },
   { target: 'model', category: 'array-edit' }
 );

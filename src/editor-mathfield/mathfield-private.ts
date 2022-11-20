@@ -117,9 +117,12 @@ import {
   defaultGetDefinition,
   getMacroDefinition,
 } from '../core/context-utils';
+import { globalMathLive } from '../mathlive';
+import { resolveUrl } from '../common/script-url';
 
 let CORE_STYLESHEET_HASH: string | undefined = undefined;
 let MATHFIELD_STYLESHEET_HASH: string | undefined = undefined;
+const AUDIO_FEEDBACK_VOLUME = 0.5; // From 0.0 to 1.0
 
 /** @internal */
 export class MathfieldPrivate implements GlobalContext, Mathfield {
@@ -180,12 +183,6 @@ export class MathfieldPrivate implements GlobalContext, Mathfield {
   }[];
   inlineShortcutBufferFlushTimer: ReturnType<typeof setTimeout>;
 
-  keypressSound: null | HTMLAudioElement;
-  spacebarKeypressSound: null | HTMLAudioElement;
-  returnKeypressSound: null | HTMLAudioElement;
-  deleteKeypressSound: null | HTMLAudioElement;
-  plonkSound: null | HTMLAudioElement;
-
   private blurred: boolean;
 
   // The value of the mathfield when it is focussed.
@@ -197,15 +194,18 @@ export class MathfieldPrivate implements GlobalContext, Mathfield {
   private readonly stylesheets: (null | Stylesheet)[] = [];
   private resizeTimer: ReturnType<typeof requestAnimationFrame>;
 
+  private audioBuffers: { [key: string]: AudioBuffer } = {};
+  private _audioContext: AudioContext;
+
   /**
    *
    * - `options.computeEngine`: An instance of a `ComputeEngine`. It is used to parse and serialize
    * LaTeX strings, using the information contained in the dictionaries
    * of the Compute Engine to determine, for example, which symbols are
-   * numbers or which are functions, and therefore corectly interpret
+   * numbers or which are functions, and therefore correctly interpret
    * `bf(x)` as `b \\times f(x)`.
    *
-   * If no instance is provided, a new, default, one is created.
+   * If no instance is provided, a new default one is created.
    *
    * @param element - The DOM element that this mathfield is attached to.
    * Note that `element.mathfield` is this object.
@@ -214,7 +214,6 @@ export class MathfieldPrivate implements GlobalContext, Mathfield {
     element: HTMLElement & { mathfield?: MathfieldPrivate },
     options: Partial<MathfieldOptionsPrivate> & {
       eventSink?: HTMLElement;
-      computeEngine?: ComputeEngine;
     }
   ) {
     // Setup default config options
@@ -237,31 +236,11 @@ export class MathfieldPrivate implements GlobalContext, Mathfield {
     if (this.options.virtualKeyboardMode === 'auto')
       this.options.virtualKeyboardMode = isTouchCapable() ? 'onfocus' : 'off';
 
-    if (options.computeEngine) this._computeEngine = options.computeEngine;
+    if (this.options.computeEngine !== undefined)
+      this._computeEngine = options.computeEngine;
     if (options.eventSink) this.host = options.eventSink;
 
     this.placeholders = new Map();
-
-    this.plonkSound = this.options.plonkSound as HTMLAudioElement;
-    if (!this.options.keypressSound) {
-      this.keypressSound = null;
-      this.spacebarKeypressSound = null;
-      this.returnKeypressSound = null;
-      this.deleteKeypressSound = null;
-    } else if (
-      this.options.keypressSound &&
-      typeof this.options.keypressSound !== 'string' &&
-      !(this.options.keypressSound instanceof HTMLAudioElement)
-    ) {
-      this.keypressSound = this.options.keypressSound
-        .default as HTMLAudioElement;
-      this.spacebarKeypressSound = this.options.keypressSound
-        .spacebar as HTMLAudioElement;
-      this.returnKeypressSound = this.options.keypressSound
-        .return as HTMLAudioElement;
-      this.deleteKeypressSound = this.options.keypressSound
-        .delete as HTMLAudioElement;
-    }
 
     this.element = element;
     element.mathfield = this;
@@ -270,7 +249,8 @@ export class MathfieldPrivate implements GlobalContext, Mathfield {
     if (elementText) elementText = elementText.trim();
 
     // Load the fonts, inject the core and mathfield stylesheets
-    void loadFonts(this.options.fontsDirectory);
+    if (this.options.fontsDirectory !== null)
+      void loadFonts(this.options.fontsDirectory);
     if (!CORE_STYLESHEET_HASH)
       CORE_STYLESHEET_HASH = hashCode(CORE_STYLESHEET).toString(36);
 
@@ -292,15 +272,12 @@ export class MathfieldPrivate implements GlobalContext, Mathfield {
     // events as this has the side effect of triggering the OS virtual keyboard
     // which we want to avoid
     let markup = "<span class='ML__textarea'>";
-    console.log("isTouchCapable:",isTouchCapable())
     if (isTouchCapable())
-      markup += `<span class='ML__textarea__textarea' tabindex="-1" role="textbox"></span>`;
+      markup += `<span class=ML__textarea__textarea tabindex=-1 role=textbox></span>`;
     else {
-      markup +=
-        '<textarea class="ML__textarea__textarea" inputmode="none" autocapitalize="off" autocomplete="off" ' +
-        `autocorrect="off" spellcheck="false" aria-hidden="true" tabindex="${
-          element.tabIndex ?? 0
-        }"></textarea>`;
+      markup += `<textarea class=ML__textarea__textarea autocapitalize=off autocomplete=off autocorrect=off spellcheck=false inputmode=none aria-hidden="true" tabindex="${
+        element.tabIndex ?? 0
+      }"></textarea>`;
     }
     markup += '</span>';
 
@@ -564,6 +541,11 @@ export class MathfieldPrivate implements GlobalContext, Mathfield {
     if (isBrowser()) document.fonts.ready.then(() => render(this));
   }
 
+  get audioContext(): AudioContext {
+    if (!this._audioContext) this._audioContext = new AudioContext();
+    return this._audioContext;
+  }
+
   /** Global Context.
    * These properties are accessed by the atom instances for rendering/layout
    */
@@ -643,8 +625,8 @@ export class MathfieldPrivate implements GlobalContext, Mathfield {
 
     if (!this._virtualKeyboard) {
       if (
-        window.mathlive?.sharedVirtualKeyboard ||
-        this.options.useSharedVirtualKeyboard
+        this.options.useSharedVirtualKeyboard ||
+        globalMathLive().sharedVirtualKeyboard
       ) {
         this._virtualKeyboard = new VirtualKeyboardDelegate({
           targetOrigin: this.options.sharedVirtualKeyboardTargetOrigin,
@@ -656,8 +638,8 @@ export class MathfieldPrivate implements GlobalContext, Mathfield {
     return this._virtualKeyboard;
   }
 
-  get computeEngine(): ComputeEngine {
-    if (!this._computeEngine) {
+  get computeEngine(): ComputeEngine | null {
+    if (this._computeEngine === undefined) {
       this._computeEngine = new ComputeEngine();
       if (this.options.decimalSeparator === ',')
         this._computeEngine.latexOptions.decimalMarker = '{,}';
@@ -701,6 +683,10 @@ export class MathfieldPrivate implements GlobalContext, Mathfield {
 
   setOptions(config: Partial<MathfieldOptionsPrivate>): void {
     this.options = updateOptions(this.options, config);
+
+    if ('computeEngine' in config)
+      this._computeEngine = this.options.computeEngine;
+
     if (this._computeEngine && 'decimalSeparator' in config) {
       this._computeEngine.latexOptions.decimalMarker =
         this.options.decimalSeparator === ',' ? '{,}' : '.';
@@ -720,21 +706,15 @@ export class MathfieldPrivate implements GlobalContext, Mathfield {
 
     this._keybindings = undefined;
 
-    this.plonkSound = this.options.plonkSound as HTMLAudioElement;
     if (
-      this.options.keypressSound &&
-      typeof this.options.keypressSound !== 'string' &&
-      !(this.options.keypressSound instanceof HTMLAudioElement)
-    ) {
-      this.keypressSound = this.options.keypressSound
-        .default as HTMLAudioElement;
-      this.spacebarKeypressSound = this.options.keypressSound
-        .spacebar as HTMLAudioElement;
-      this.returnKeypressSound = this.options.keypressSound
-        .return as HTMLAudioElement;
-      this.deleteKeypressSound = this.options.keypressSound
-        .delete as HTMLAudioElement;
-    }
+      'soundsDirectory' in config ||
+      'plonkSound' in config ||
+      'keypressSound' in config ||
+      'spacebarKeypressSound' in config ||
+      'returnKeypressSound' in config ||
+      'deleteKeypressSound' in config
+    )
+      this.audioBuffers = {};
 
     if (this.options.defaultMode === 'inline-math')
       this.element!.classList.add('ML__isInline');
@@ -943,9 +923,82 @@ export class MathfieldPrivate implements GlobalContext, Mathfield {
     }
   }
 
-  get expression(): BoxedExpression {
+  get expression(): BoxedExpression | null {
     const ce = this.computeEngine;
+    if (!ce) return null;
     return ce.box(ce.parse(this.model.getValue()));
+  }
+
+  loadSound(
+    sound: 'keypress' | 'spacebar' | 'delete' | 'plonk' | 'return'
+  ): void {
+    //  Clear out the cached audio buffer
+    delete this.audioBuffers[sound];
+
+    let soundFile: string | undefined | null = '';
+    switch (sound) {
+      case 'keypress':
+        soundFile =
+          typeof this.options.keypressSound === 'string'
+            ? this.options.keypressSound
+            : this.options.keypressSound?.default;
+        break;
+      case 'spacebar':
+        soundFile =
+          typeof this.options.keypressSound === 'string'
+            ? this.options.keypressSound
+            : this.options.keypressSound?.spacebar ??
+              this.options.keypressSound?.default;
+        break;
+      case 'delete':
+        soundFile =
+          typeof this.options.keypressSound === 'string'
+            ? this.options.keypressSound
+            : this.options.keypressSound?.delete ??
+              this.options.keypressSound?.default;
+        break;
+      case 'plonk':
+        soundFile = this.options.plonkSound;
+        break;
+    }
+
+    if (typeof soundFile !== 'string') return;
+    soundFile = soundFile.trim();
+    const soundsDirectory = this.options.soundsDirectory;
+    if (
+      soundsDirectory === undefined ||
+      soundsDirectory === null ||
+      soundsDirectory === 'null' ||
+      soundFile === 'none' ||
+      soundFile === 'null'
+    )
+      return;
+
+    // Fetch the audio buffer
+    fetch(resolveUrl(soundsDirectory + '/' + soundFile))
+      .then((response) => response.arrayBuffer())
+      .then((arrayBuffer) => this.audioContext.decodeAudioData(arrayBuffer))
+      .then((audioBuffer) => {
+        this.audioBuffers[sound] = audioBuffer;
+      });
+  }
+
+  playSound(
+    name: 'keypress' | 'spacebar' | 'delete' | 'plonk' | 'return'
+  ): void {
+    if (!this.audioBuffers[name]) this.loadSound(name);
+    if (!this.audioBuffers[name]) return;
+
+    // A sound source can't be played twice, so creeate a new one
+    const soundSource = this.audioContext.createBufferSource();
+    soundSource.buffer = this.audioBuffers[name];
+
+    // Set the volume
+    const gainNode = this.audioContext.createGain();
+    gainNode.gain.value = AUDIO_FEEDBACK_VOLUME;
+    soundSource.connect(gainNode).connect(this.audioContext.destination);
+
+    soundSource.start();
   }
 
   /** Make sure the caret is visible within the matfield.
@@ -1041,7 +1094,7 @@ export class MathfieldPrivate implements GlobalContext, Mathfield {
         if (this.options.keypressVibration && canVibrate())
           navigator.vibrate(HAPTIC_FEEDBACK_DURATION);
 
-        void this.keypressSound?.play().catch(console.warn);
+        void this.playSound('keypress');
       }
 
       if (options.scrollIntoView) this.scrollIntoView();
@@ -1069,6 +1122,20 @@ export class MathfieldPrivate implements GlobalContext, Mathfield {
 
   switchMode(mode: ParseMode, prefix = '', suffix = ''): void {
     if (this.mode === mode || this.options.readOnly) return;
+
+    // Dispatch event with option of canceling
+    if (
+      !this.host?.dispatchEvent(
+        new Event('mode-change', {
+          bubbles: true,
+          composed: true,
+          cancelable: true,
+        })
+      )
+    )
+      return;
+
+    // Notify of mode change
     const currentMode = this.mode;
     const { model } = this;
     model.deferNotifications(
@@ -1152,13 +1219,6 @@ export class MathfieldPrivate implements GlobalContext, Mathfield {
           contentChanged = true;
         }
 
-        // Notify of mode change
-        this.host?.dispatchEvent(
-          new Event('mode-change', {
-            bubbles: true,
-            composed: true,
-          })
-        );
         requestUpdate(this);
         return contentChanged;
       }
@@ -1358,6 +1418,10 @@ export class MathfieldPrivate implements GlobalContext, Mathfield {
     );
   }
 
+  resetUndo(): void {
+    this.undoManager?.reset();
+  }
+
   private _onSelectionDidChange(): void {
     // Keep the content of the textarea in sync with the selection.
     // This will allow cut/copy to work.
@@ -1438,8 +1502,8 @@ export class MathfieldPrivate implements GlobalContext, Mathfield {
       this.executeCommand('commit');
 
     if (
-      !window.mathlive?.sharedVirtualKeyboard &&
-      /onfocus|manual/.test(this.options.virtualKeyboardMode)
+      /onfocus|manual/.test(this.options.virtualKeyboardMode) &&
+      !globalMathLive().sharedVirtualKeyboard
     )
       this.executeCommand('hideVirtualKeyboard');
 
@@ -1503,5 +1567,18 @@ export class MathfieldPrivate implements GlobalContext, Mathfield {
     field.scrollBy({ top: 0, left: wheelDelta });
     ev.preventDefault();
     ev.stopPropagation();
+  }
+
+  getHTMLElement(atom: Atom): HTMLSpanElement {
+    // find an atom id in this atom or its children
+    let target = atom;
+    while (!target.id && target.hasChildren) target = atom.children[0];
+
+    if (target.id) {
+      return this.element!.querySelector(
+        `[data-atom-id="${target.id}"]`
+      ) as HTMLSpanElement;
+    }
+    throw new TypeError('Could not get an ID from atom');
   }
 }

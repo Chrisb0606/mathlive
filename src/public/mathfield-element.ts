@@ -4,6 +4,7 @@ import {
   update as updateOptions,
 } from '../editor/options';
 import { MathfieldPrivate } from '../editor-mathfield/mathfield-private';
+import { offsetFromPoint } from '../editor-mathfield/pointer-input';
 import { isOffset, isRange, isSelection } from '../editor/model';
 import { isBrowser, throwIfNotInBrowser } from '../common/capabilities';
 
@@ -18,6 +19,13 @@ import {
   Selection,
 } from './mathfield';
 import { MathfieldOptions } from './options';
+import { getAtomBounds } from '../editor-mathfield/utils';
+
+export declare type Expression =
+  | number
+  | string
+  | { [key: string]: any }
+  | [Expression, ...Expression[]];
 
 //
 // Custom Events
@@ -39,21 +47,6 @@ import { MathfieldOptions } from './options';
     To make a custom event pass through shadow DOM boundaries, you must set
     both the `composed` and `bubbles` flags to true.
 */
-
-/**
- * The `keystroke` event is fired when a keystroke is about to be processed.
- * The event is cancellable, which wills suppress further handling of the event.
- *
- */
-export type KeystrokeEvent = {
-  /** A string descring the keystroke, for example `"Alt-KeyU". See [W3C UIEvents](https://www.w3.org/TR/uievents/#keys-keyvalues)
-   * for more information on the format of the descriptor.
-   *
-   */
-  keystroke: string;
-  /** The native keyboard event */
-  event?: KeyboardEvent;
-};
 
 /**
  * The `focus-out` event signals that the mathfield has lost focus through keyboard
@@ -97,6 +90,14 @@ export type MoveOutEvent = {
   direction: 'forward' | 'backward' | 'upward' | 'downward';
 };
 
+/**  The `placeholder-change` event signals that an editable placeholder inside
+ * a read-only mathfield has been modified. The `placeholderId` property
+ * indicates which placeholder was changed.
+ */
+export type PlaceholderChange = {
+  placeholderId: string;
+};
+
 /**
  * See documentation for the `virtual-keyboard-mode` option.
  */
@@ -109,10 +110,10 @@ declare global {
    */
   interface HTMLElementEventMap {
     'focus-out': CustomEvent<FocusOutEvent>;
-    'keystroke': CustomEvent<KeystrokeEvent>;
     'mode-change': Event;
     'mount': Event;
     'move-out': CustomEvent<MoveOutEvent>;
+    'placeholder-change': CustomEvent<PlaceholderChange>;
     'unmount': Event;
     'read-aloud-status-change': Event;
     'selection-change': Event;
@@ -125,8 +126,11 @@ declare global {
 // Note: the `position: relative` is required to fix https://github.com/arnog/mathlive/issues/971
 //
 
-const MATHFIELD_TEMPLATE = document.createElement('template');
-MATHFIELD_TEMPLATE.innerHTML = `<style>
+const MATHFIELD_TEMPLATE = isBrowser()
+  ? document.createElement('template')
+  : null;
+if (MATHFIELD_TEMPLATE) {
+  MATHFIELD_TEMPLATE.innerHTML = `<style>
 :host { display: block; position: relative; overflow: hidden auto;}
 :host([hidden]) { display: none; }
 :host([disabled]) { opacity:  .5; }
@@ -137,7 +141,7 @@ MATHFIELD_TEMPLATE.innerHTML = `<style>
 :host([readonly]), :host([read-only]) { outline: none; }
 </style>
 <div></div><slot style="display:none"></slot>`;
-
+}
 //
 // Deferred State
 //
@@ -359,7 +363,7 @@ export interface MathfieldElementAttributes {
    * to send control messages from child to parent frame to remote control
    * of mathfield component.
    *
-   * **Default**: `window.origin`
+   * **Default**: `globalThis.origin`
    */
   'shared-virtual-keyboard-target-origin': string;
 
@@ -509,10 +513,10 @@ export interface MathfieldElementAttributes {
  * | `text-to-speech-markup` | `options.textToSpeechMarkup` |
  * | `text-to-speech-rules` | `options.textToSpeechRules` |
  * | `value` | `value` |
- * | `virtual-keyboard-layout` | `options.keyboardLayout` |
- * | `virtual-keyboard-mode` | `options.keyboardMode` |
- * | `virtual-keyboard-theme` | `options.keyboardTheme` |
- * | `virtual-keyboards` | `options.keyboards` |
+ * | `virtual-keyboard-layout` | `options.virtualKeyboardLayout` |
+ * | `virtual-keyboard-mode` | `options.virtualKeyboardMode` |
+ * | `virtual-keyboard-theme` | `options.virtualKeyboardTheme` |
+ * | `virtual-keyboards` | `options.virtualKeyboards` |
  *
  * </div>
  *
@@ -651,7 +655,7 @@ export class MathfieldElement extends HTMLElement implements Mathfield {
     super();
 
     this.attachShadow({ mode: 'open' });
-    this.shadowRoot!.append(MATHFIELD_TEMPLATE.content.cloneNode(true));
+    this.shadowRoot!.append(MATHFIELD_TEMPLATE!.content.cloneNode(true));
 
     // When the elements get focused (through tabbing for example)
     // focus the mathfield
@@ -744,14 +748,32 @@ export class MathfieldElement extends HTMLElement implements Mathfield {
     if (!this._mathfield) return undefined;
     return this._mathfield.computeEngine;
   }
+  set computeEngine(val: any | null) {
+    if (!this._mathfield) return;
+    this._mathfield.setOptions({ computeEngine: val });
+  }
 
-  get expression(): any {
+  get expression(): any | null {
     if (!this._mathfield) return undefined;
     return this._mathfield.expression;
   }
 
+  set expression(mathJson: Expression | any) {
+    if (!this._mathfield) return;
+    const latex = this.computeEngine?.box(mathJson).latex ?? null;
+    if (latex !== null) this._mathfield.setValue(latex);
+  }
+
   get errors(): LatexSyntaxError[] {
     return this._mathfield?.errors ?? [];
+  }
+
+  get placeholders(): { [id: string]: MathfieldElement } {
+    if (!this._mathfield) return {};
+    const result = {};
+    for (const [key, value] of this._mathfield.placeholders)
+      result[key] = value.field;
+    return result;
   }
 
   /**
@@ -875,6 +897,7 @@ export class MathfieldElement extends HTMLElement implements Mathfield {
    */
   setValue(value?: string, options?: InsertOptions): void {
     if (this._mathfield && value !== undefined) {
+      if (!options) options = { suppressChangeNotifications: true };
       this._mathfield.setValue(value, options);
       return;
     }
@@ -999,6 +1022,68 @@ export class MathfieldElement extends HTMLElement implements Mathfield {
     return this._mathfield?.setCaretPoint(x, y) ?? false;
   }
 
+  /** The offset closest to the location `(x, y)` in viewport coordinate.
+   *
+   * **`bias`**:  if `0`, the vertical midline is considered to the left or
+   * right sibling. If `-1`, the left sibling is favored, if `+1`, the right
+   * sibling is favored.
+   *
+   * @category Selection
+   */
+  offsetFromPoint(
+    x: number,
+    y: number,
+    options?: { bias?: -1 | 0 | 1 }
+  ): Offset {
+    if (!this._mathfield) return -1;
+    return offsetFromPoint(this._mathfield, x, y, options);
+  }
+
+  /** The bounding rect of the atom at offset
+   *
+   * @category Selection
+   *
+   */
+  hitboxFromOffset(offset: number): DOMRect | null {
+    if (!this._mathfield) return null;
+    const atom = this._mathfield.model.at(offset);
+    if (!atom) return null;
+    const bounds = getAtomBounds(this._mathfield, atom);
+    if (!bounds) return null;
+    return new DOMRect(
+      bounds.left,
+      bounds.top,
+      bounds.right - bounds.left,
+      bounds.bottom - bounds.top
+    );
+  }
+
+  /**
+   * Reset the undo stack
+   * (for parent components with their own undo/redo)
+   */
+  resetUndo(): void {
+    this._mathfield?.resetUndo();
+  }
+
+  /**
+   * Return whether there are undoable items
+   * (for parent components with their own undo/redo)
+   */
+  canUndo(): boolean {
+    if (!this._mathfield) return false;
+    return this._mathfield.canUndo();
+  }
+
+  /**
+   * Return whether there are redoable items
+   * (for parent components with their own undo/redo)
+   */
+  canRedo(): boolean {
+    if (!this._mathfield) return false;
+    return this._mathfield.canRedo();
+  }
+
   /**
    * Custom elements lifecycle hooks
    * @internal
@@ -1082,7 +1167,7 @@ export class MathfieldElement extends HTMLElement implements Mathfield {
     }
 
     // The mathfield creation could have failed
-    if (!this._mathfield || !this._mathfield.model) {
+    if (!this._mathfield?.model) {
       this._mathfield = null;
       return;
     }
@@ -1203,13 +1288,14 @@ export class MathfieldElement extends HTMLElement implements Mathfield {
     if (isReadonly) {
       this.setAttribute('readonly', '');
       this.setAttribute('disabled', '');
+      this.setAttribute('aria-readonly', 'true');
     } else {
       this.removeAttribute('readonly');
       this.removeAttribute('read-only');
       this.removeAttribute('disabled');
+      this.removeAttribute('aria-readonly');
     }
 
-    this.setAttribute('aria-disabled', isReadonly ? 'true' : 'false');
     this.setOptions({ readOnly: isReadonly });
   }
 
@@ -1250,14 +1336,14 @@ export class MathfieldElement extends HTMLElement implements Mathfield {
   set defaultMode(value: 'inline-math' | 'math' | 'text') {
     this.setOptions({ defaultMode: value });
   }
-  get fontsDirectory(): string {
+  get fontsDirectory(): string | null {
     return this.getOption('fontsDirectory');
   }
-  set fontsDirectory(value: string) {
+  set fontsDirectory(value: string | null) {
     this.setOptions({ fontsDirectory: value });
   }
   get mathModeSpace(): string {
-    return this.getOption('fontsDirectory');
+    return this.getOption('mathModeSpace');
   }
   set mathModeSpace(value: string) {
     this.setOptions({ mathModeSpace: value });
@@ -1276,34 +1362,32 @@ export class MathfieldElement extends HTMLElement implements Mathfield {
   }
   get keypressSound():
     | string
-    | HTMLAudioElement
     | null
     | {
-        spacebar?: null | string | HTMLAudioElement;
-        return?: null | string | HTMLAudioElement;
-        delete?: null | string | HTMLAudioElement;
-        default: null | string | HTMLAudioElement;
+        spacebar?: null | string;
+        return?: null | string;
+        delete?: null | string;
+        default: null | string;
       } {
     return this.getOption('keypressSound');
   }
   set keypressSound(
     value:
       | string
-      | HTMLAudioElement
       | null
       | {
-          spacebar?: null | string | HTMLAudioElement;
-          return?: null | string | HTMLAudioElement;
-          delete?: null | string | HTMLAudioElement;
-          default: null | string | HTMLAudioElement;
+          spacebar?: null | string;
+          return?: null | string;
+          delete?: null | string;
+          default: null | string;
         }
   ) {
     this.setOptions({ keypressSound: value });
   }
-  get plonkSound(): string | HTMLAudioElement | null {
+  get plonkSound(): string | null {
     return this.getOption('plonkSound') ?? null;
   }
-  set plonkSound(value: string | HTMLAudioElement | null) {
+  set plonkSound(value: string | null) {
     this.setOptions({ plonkSound: value });
   }
   get letterShapeStyle(): 'auto' | 'tex' | 'iso' | 'french' | 'upright' {
@@ -1606,7 +1690,13 @@ declare global {
 }
 
 if (isBrowser() && !window.customElements?.get('math-field')) {
+  // The `globalThis[Symbol.for('mathlive')]` global is used  to coordinate between mathfield
+  // instances that may have been instantiated by different versions of the
+  // library
+  globalThis[Symbol.for('mathlive')] ??= {};
+  const global = globalThis[Symbol.for('mathlive')];
+  global.version = '{{SDK_VERSION}}';
+
   window.MathfieldElement = MathfieldElement;
-  window.mathlive = { version: '{{SDK_VERSION}}' };
   window.customElements?.define('math-field', MathfieldElement);
 }

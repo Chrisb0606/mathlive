@@ -349,6 +349,16 @@ export const DEFAULT_KEYBINDINGS: Keybinding[] = [
     ifMode: 'math',
     command: 'addRowBefore',
   },
+  {
+    key: 'ctrl+[Backspace]',
+    ifMode: 'math',
+    command: 'removeRow',
+  },
+  {
+    key: 'cmd+[Backspace]',
+    ifMode: 'math',
+    command: 'removeRow',
+  },
 
   {
     key: 'ctrl+[Comma]',
@@ -366,14 +376,20 @@ export const DEFAULT_KEYBINDINGS: Keybinding[] = [
     key: 'shift+ctrl+[Comma]',
     ifLayout: ['apple.en-intl', 'windows.en-intl', 'linux.en'],
     ifMode: 'math',
-    command: 'addColumnAfter',
+    command: 'addColumnBefore',
   },
   {
     key: 'shift+cmd+[Comma]',
     ifLayout: ['apple.en-intl', 'windows.en-intl', 'linux.en'],
     ifMode: 'math',
-    command: 'addColumnAfter',
+    command: 'addColumnBefore',
   },
+  {
+    key: 'shift+[Backspace]',
+    ifMode: 'math',
+    command: 'removeColumn',
+  },
+
   {
     key: 'alt+[Digit5]',
     ifLayout: ['apple.en-intl', 'windows.en-intl', 'linux.en'],
@@ -448,7 +464,7 @@ export const REVERSE_KEYBINDINGS = {
   '\\forall': 'shift+alt+a',
   '\\exists': 'shift+alt+e',
   '\\infty': 'alt+[Digit5]',
-  '\\wedge': 'alt+[Digit5]',
+  '\\wedge': 'alt+[Digit6]',
   '\\vee': 'shift+alt+[Digit6]',
   '\\differentialD': 'alt+d',
   '\\partial': 'shift+alt+d',

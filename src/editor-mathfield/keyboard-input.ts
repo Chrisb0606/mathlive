@@ -141,9 +141,7 @@ export function onKeystroke(
           // inline shortcut
           if (
             !shortcut &&
-            /^[a-zA-Z][a-zA-Z0-9]+'?([_\^][a-zA-Z0-9\*\+\-]'?)?$/.test(
-              candidate
-            )
+            /^[a-zA-Z][a-zA-Z0-9]+?([_\^][a-zA-Z0-9\*\+\-]+?)?$/.test(candidate)
           )
             shortcut = mathfield.options.onInlineShortcut(mathfield, candidate);
 
@@ -179,12 +177,16 @@ export function onKeystroke(
 
       // Notify of mode change
       if (mathfield.mode !== previousMode) {
-        mathfield.host?.dispatchEvent(
-          new Event('mode-change', {
-            bubbles: true,
-            composed: true,
-          })
-        );
+        if (
+          !mathfield.host?.dispatchEvent(
+            new Event('mode-change', {
+              bubbles: true,
+              composed: true,
+              cancelable: true,
+            })
+          )
+        )
+          mathfield.mode = previousMode;
       }
     }
   }
@@ -205,12 +207,12 @@ export function onKeystroke(
 
     // 4.4 Handle the return/enter key
     if (!selector && (keystroke === '[Enter]' || keystroke === '[Return]')) {
-      let result = true;
+      let result = false;
       if (contentWillChange(model, { inputType: 'insertLineBreak' })) {
         // No matching keybinding: trigger a commit
 
         if (mathfield.host) {
-          result = mathfield.host.dispatchEvent(
+          result = !mathfield.host.dispatchEvent(
             new Event('change', {
               bubbles: true,
               composed: true,
@@ -252,7 +254,7 @@ export function onKeystroke(
             evt.preventDefault();
             evt.stopPropagation();
           }
-          return true;
+          return false;
         }
         const nextSibling = model.at(model.position + 1);
         const previousSibling = model.at(model.position - 1);
@@ -425,7 +427,7 @@ export function onTypedText(
     if (mathfield.options.keypressVibration && canVibrate())
       navigator.vibrate(HAPTIC_FEEDBACK_DURATION);
 
-    mathfield.keypressSound?.play().catch(console.warn);
+    mathfield.playSound('keypress');
   }
 
   //
@@ -506,6 +508,7 @@ export function onTypedText(
         /\d/.test(c) &&
         mathfield.options.smartSuperscript &&
         atom.treeBranch === 'superscript' &&
+        atom.parent?.type !== 'mop' &&
         atom.hasNoSiblings
       ) {
         // We are inserting a digit into an empty superscript

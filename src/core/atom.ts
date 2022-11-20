@@ -5,6 +5,7 @@ import { ArrayAtom } from '../core-atoms/array';
 import { BoxAtom } from '../core-atoms/box';
 import { CompositionAtom } from '../core-atoms/composition';
 import { ChemAtom } from '../core-definitions/mhchem';
+import { ChoiceAtom } from '../core-atoms/choice';
 import { DelimAtom } from '../core-atoms/delim';
 import { EncloseAtom } from '../core-atoms/enclose';
 import { ErrorAtom } from '../core-atoms/error';
@@ -25,6 +26,7 @@ import { SpacingAtom } from '../core-atoms/spacing';
 import { SubsupAtom } from '../core-atoms/subsup';
 import { SurdAtom } from '../core-atoms/surd';
 import { TextAtom } from '../core-atoms/text';
+import { TooltipAtom } from '../core-atoms/tooltip';
 
 import { Atom, AtomJson, AtomType, NAMED_BRANCHES } from './atom-class';
 import { GlobalContext } from './context';
@@ -55,6 +57,7 @@ export function fromJson(
   if (type === 'box') result = BoxAtom.fromJson(json, context);
   if (type === 'composition') result = CompositionAtom.fromJson(json, context);
   if (type === 'chem') result = ChemAtom.fromJson(json, context);
+  if (type === 'choice') result = ChoiceAtom.fromJson(json, context);
   if (type === 'delim') result = DelimAtom.fromJson(json, context);
   if (type === 'enclose') result = EncloseAtom.fromJson(json, context);
   if (type === 'error') result = ErrorAtom.fromJson(json, context);
@@ -79,6 +82,7 @@ export function fromJson(
   if (type === 'spacing') result = SpacingAtom.fromJson(json, context);
   if (type === 'surd') result = SurdAtom.fromJson(json, context);
   if (type === 'text') result = TextAtom.fromJson(json, context);
+  if (type === 'tooltip') result = TooltipAtom.fromJson(json, context);
 
   if (type === 'mop') result = OperatorAtom.fromJson(json, context);
 

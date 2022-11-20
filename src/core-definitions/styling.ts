@@ -9,13 +9,14 @@ import {
 
 import { GroupAtom } from '../core-atoms/group';
 import { BoxAtom } from '../core-atoms/box';
+import { ChoiceAtom } from '../core-atoms/choice';
 import { PhantomAtom } from '../core-atoms/phantom';
 import { SizedDelimAtom } from '../core-atoms/delim';
 import { SpacingAtom } from '../core-atoms/spacing';
 import { LineAtom } from '../core-atoms/line';
 import { OverunderAtom } from '../core-atoms/overunder';
 import { OverlapAtom } from '../core-atoms/overlap';
-import { GenfracAtom } from '../core-atoms/genfrac';
+import '../core-atoms/genfrac';
 import { RuleAtom } from '../core-atoms/rule';
 import { OperatorAtom } from '../core-atoms/operator';
 import { MathstyleName } from '../core/mathstyle';
@@ -23,6 +24,52 @@ import { BoxType } from '../core/box';
 import { GlobalContext, PrivateStyle } from '../core/context';
 
 import { Argument, defineFunction } from './definitions-utils';
+import { TooltipAtom } from '../core-atoms/tooltip';
+
+defineFunction('mathtip', '{:math}{:math}', {
+  createAtom: (
+    name: string,
+    args: Argument[],
+    style: PrivateStyle,
+    context: GlobalContext
+  ): Atom =>
+    new TooltipAtom(args[0] as Atom[], args[1] as Atom[], context, {
+      command: name,
+      content: 'math',
+      style,
+    }),
+});
+
+defineFunction('texttip', '{:math}{:text}', {
+  createAtom: (
+    name: string,
+    args: Argument[],
+    style: PrivateStyle,
+    context: GlobalContext
+  ): Atom =>
+    new TooltipAtom(args[0] as Atom[], args[1] as Atom[], context, {
+      command: name,
+      content: 'text',
+      style,
+    }),
+});
+
+defineFunction('error', '{:math}', {
+  createAtom: (
+    _name: string,
+    args: Argument[],
+    style: PrivateStyle,
+    context: GlobalContext
+  ): Atom =>
+    new GroupAtom(args[0] as Atom[], context, {
+      mode: 'math',
+      command: '\\error',
+      customClass: 'ML__error',
+      style,
+      serialize: (atom: GroupAtom, options: ToLatexOptions) =>
+        `\\error{${atom.bodyToLatex(options)}}`,
+    }),
+});
 
 defineFunction('ensuremath', '{:math}', {
   createAtom: (
@@ -726,6 +773,45 @@ defineFunction(
   }
 );
 
+defineFunction(
+  [
+    'mkern',
+    'kern',
+    // mkern accepts `mu` as a unit. We're lenient and
+    // also accept it with `kern`
+  ],
+  '{width:glue}',
+  {
+    createAtom: (
+      name: string,
+      args: Argument[],
+      style: PrivateStyle,
+      context: GlobalContext
+    ): Atom =>
+      new SpacingAtom(
+        name,
+        style,
+        context,
+        (args[0] as Glue) ?? { glue: { dimension: 0 } }
+      ),
+  }
+);
+
+defineFunction('mspace', '{width:glue}', {
+  createAtom: (
+    name: string,
+    args: Argument[],
+    style: PrivateStyle,
+    context: GlobalContext
+  ): Atom =>
+    new SpacingAtom(
+      name,
+      style,
+      context,
+      (args[0] as Glue) ?? { glue: { dimension: 0 } }
+    ),
+});
+
 defineFunction('mathop', '{:auto}', {
   createAtom: (
     command: string,
@@ -741,6 +827,15 @@ defineFunction('mathop', '{:auto}', {
       hasArgument: true,
       style,
     }),
+});
+
+defineFunction('mathchoice', '{:math}{:math}{:math}{:math}', {
+  createAtom: (
+    _command: string,
+    args: Argument[],
+    _style: PrivateStyle,
+    context: GlobalContext
+  ): Atom => new ChoiceAtom(args as Atom[][], context),
 });
 
 defineFunction(
@@ -999,30 +1094,6 @@ defineFunction(
         serialize: (atom: OverunderAtom, options: ToLatexOptions) =>
           `${atom.command}{${atom.aboveToLatex(options)}}` +
           `{${atom.bodyToLatex(options)}}`,
-      }),
-  }
-);
-
-defineFunction(
-  ['overwithdelims', 'atopwithdelims'],
-  '{numer:auto}{denom:auto}{left-delim:delim}{right-delim:delim}',
-  {
-    infix: true,
-    createAtom: (
-      name: string,
-      args: Argument[],
-      style: PrivateStyle,
-      context: GlobalContext
-    ): Atom =>
-      new GenfracAtom(name, args[0] as Atom[], args[1] as Atom[], context, {
-        leftDelim: args[2] as string,
-        rightDelim: args[3] as string,
-        hasBarLine: false,
-        style,
-        serialize: (atom: GenfracAtom, options: ToLatexOptions) =>
-          `${atom.aboveToLatex(options)} ${atom.command}${atom.leftDelim}${
-            atom.rightDelim
-          }${atom.belowToLatex(options)}`,
       }),
   }
 );

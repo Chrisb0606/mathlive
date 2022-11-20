@@ -249,9 +249,27 @@ export function validateOrigin(
   if (originValidator === 'none') return true;
 
   if (originValidator === 'same-origin')
-    return !window.origin || origin === window.origin;
+    return !globalThis.origin || origin === globalThis.origin;
 
   if (typeof originValidator === 'function') return originValidator(origin);
 
   return false;
+}
+
+/**
+ * Calculates a DOMRect like getBoundingClientRect
+ * but excluding any CSS transforms
+ */
+export function getLocalDOMRect(el: HTMLElement): DOMRect {
+  let offsetTop = 0;
+  let offsetLeft = 0;
+  const width = el.offsetWidth;
+  const height = el.offsetHeight;
+  while (el instanceof HTMLElement) {
+    offsetTop += el.offsetTop;
+    offsetLeft += el.offsetLeft;
+    el = el.offsetParent as HTMLElement;
+  }
+
+  return new DOMRect(offsetLeft, offsetTop, width, height);
 }

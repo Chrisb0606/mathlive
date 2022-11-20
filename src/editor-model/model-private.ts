@@ -153,6 +153,16 @@ export class ModelPrivate implements Model {
     });
   }
 
+  setPositionHandlingPlaceholder(pos: Offset): void {
+    if (this.at(pos)?.type === 'placeholder') {
+      // We're going right of a placeholder: select it
+      this.setSelection(pos - 1, pos);
+    } else if (this.at(pos)?.rightSibling?.type === 'placeholder') {
+      // We're going left of a placeholder: select it
+      this.setSelection(pos, pos + 1);
+    } else this.position = pos;
+  }
+
   getState(): ModelState {
     return {
       content: this.root.toJson(),
@@ -407,7 +417,7 @@ export class ModelPrivate implements Model {
       return result;
     }
 
-    if (format === 'math-json') {
+    if (format === 'math-json' && this.mathfield.computeEngine) {
       try {
         const expr = this.mathfield.computeEngine.parse(
           Atom.serialize(atom, { expandMacro: false, defaultMode: 'math' })

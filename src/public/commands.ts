@@ -102,6 +102,8 @@ export interface Commands {
 
   toggleKeystrokeCaption: (mathfield: Mathfield) => boolean;
 
+  plonk: (mathfield: Mathfield) => boolean;
+
   switchMode: (mathfield: Mathfield, mode: ParseMode) => boolean;
   insert: (mathfield: Mathfield, s: string, options: InsertOptions) => boolean;
   insertDecimalSeparator: (mathfield: Mathfield) => boolean;
@@ -148,6 +150,14 @@ export interface Commands {
    * @category Array
    */
   addColumnBefore: (model: Model) => boolean;
+  /**
+   * @category Array
+   */
+  removeRow: (model: Model) => boolean;
+  /**
+   * @category Array
+   */
+  removeColumn: (model: Model) => boolean;
 
   /**
    * @category Deleting

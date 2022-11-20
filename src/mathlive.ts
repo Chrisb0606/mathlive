@@ -1,9 +1,28 @@
 /* eslint-disable no-new */
 import type {
   AutoRenderOptions,
+  MathfieldOptions,
   RemoteVirtualKeyboardOptions,
   TextToSpeechOptions,
 } from './public/options';
+export * from './public/mathlive';
+
+import {
+  AutoRenderOptionsPrivate,
+  autoRenderMathInElement,
+} from './addons/auto-render';
+export * from './addons/auto-render';
+import MathLiveDebug, {
+  asciiMathToLatex,
+  latexToAsciiMath,
+} from './addons/debug';
+import { atomsToMathML } from './addons/math-ml';
+import './addons/definitions-metadata';
+
+import { atomToSpeakableText } from './editor/atom-to-speakable-text';
+import { VirtualKeyboard } from './editor/virtual-keyboard-utils';
+import './editor/virtual-keyboard-commands';
+import { RemoteVirtualKeyboard } from './editor-mathfield/remote-virtual-keyboard';
 
 import { Atom } from './core/atom-class';
 import {
@@ -11,32 +30,39 @@ import {
   validateLatex as validateLatexInternal,
 } from './core/parser';
 import { adjustInterAtomSpacing, coalesce, makeStruts, Box } from './core/box';
-import {
-  AutoRenderOptionsPrivate,
-  autoRenderMathInElement,
-} from './addons/auto-render';
-import MathLiveDebug, {
-  asciiMathToLatex,
-  latexToAsciiMath,
-} from './addons/debug';
-import { atomToSpeakableText } from './editor/atom-to-speakable-text';
-import { atomsToMathML } from './addons/math-ml';
-
-import './addons/definitions-metadata';
-
-import './editor/virtual-keyboard-commands';
-import { RemoteVirtualKeyboard } from './editor-mathfield/remote-virtual-keyboard';
 import { Context } from './core/context';
+import { isBrowser, throwIfNotInBrowser } from './common/capabilities';
 import { defaultGlobalContext } from './core/core';
 import { DEFAULT_FONT_SIZE } from './core/font-metrics';
-import { isBrowser, throwIfNotInBrowser } from './common/capabilities';
 
-export * from './public/mathlive';
-export * from './addons/auto-render';
-
-import { version as computeEngineVersion } from '@cortex-js/compute-engine';
-import { LatexSyntaxError } from './public/mathlive';
+import {
+  ComputeEngine,
+  SemiBoxedExpression,
+  version as computeEngineVersion,
+} from '@cortex-js/compute-engine';
+import { Expression, LatexSyntaxError } from './public/mathlive';
 export * from '@cortex-js/compute-engine';
+
+export type MathLiveGlobal = {
+  version: string;
+  sharedVirtualKeyboard?: RemoteVirtualKeyboard;
+  visibleVirtualKeyboard?: VirtualKeyboard;
+  config: Partial<MathfieldOptions>; // for speechEngine, speakHook
+  readAloudElement: null | HTMLElement;
+  readAloudMarks: { value: string; time: number }[];
+  readAloudTokens: string[];
+  readAloudCurrentToken: string;
+  readAloudFinalToken: null | string;
+  readAloudCurrentMark: string;
+  readAloudAudio: HTMLAudioElement;
+  readAloudStatus: string;
+  readAloudMathField: any; // MathfieldPrivate;
+};
+
+export function globalMathLive(): MathLiveGlobal {
+  globalThis[Symbol.for('mathlive')] ??= {};
+  return globalThis[Symbol.for('mathlive')];
+}
 
 /**
  * Setup the document to use a single shared virtual keyboard amongst
@@ -82,7 +108,7 @@ export * from '@cortex-js/compute-engine';
 export function makeSharedVirtualKeyboard(
   options?: Partial<RemoteVirtualKeyboardOptions>
 ): RemoteVirtualKeyboard {
-  if (!window.mathlive?.sharedVirtualKeyboard) {
+  if (!globalMathLive().sharedVirtualKeyboard) {
     if (
       [...document.querySelectorAll('math-field')].some(
         (x) =>
@@ -95,10 +121,9 @@ export function makeSharedVirtualKeyboard(
         'ERROR: makeSharedVirtualKeyboard() must be called before any mathfield element is connected to the DOM'
       );
     }
-    if (!window.mathlive) window.mathlive = {};
-    window.mathlive.sharedVirtualKeyboard = new RemoteVirtualKeyboard(options);
+    globalMathLive().sharedVirtualKeyboard = new RemoteVirtualKeyboard(options);
   }
-  return window.mathlive?.sharedVirtualKeyboard;
+  return globalMathLive().sharedVirtualKeyboard!;
 }
 
 /**
@@ -261,6 +286,13 @@ export function convertLatexToSpeakableText(
   return atomToSpeakableText(atoms, options as Required<TextToSpeechOptions>);
 }
 
+let gComputeEngine: ComputeEngine;
+
+export function serializeMathJsonToLatex(json: Expression): string {
+  if (!gComputeEngine) gComputeEngine = new ComputeEngine();
+  return gComputeEngine.box(json as SemiBoxedExpression).latex;
+}
+
 /**
  * Transform all the elements in the document body that contain LaTeX code
  * into typeset math.
@@ -273,7 +305,6 @@ export function convertLatexToSpeakableText(
  * To render a specific element, use {@linkcode renderMathInElement | renderMathInElement()}
  * ---
  *
- * Read {@tutorial getting-started | Getting Started}.
  *
  * @example
  * import { renderMathInDocument } from 'https://unpkg.com/mathlive?module';
@@ -304,10 +335,13 @@ function getElement(element: string | HTMLElement): HTMLElement | null {
  * Transform all the children of `element` that contain LaTeX code
  * into typeset math, recursively.
  *
- * Read {@tutorial mathfield-getting-started | Getting Started}.
  *
  * @param element An HTML DOM element, or a string containing
  * the ID of an element.
+ *
+ * @example
+ * import { renderMathInElement } from 'https://unpkg.com/mathlive?module';
+ * document.addEventListener("load", () => renderMathInElement('formula));
  *
  * @category Rendering
  * @keywords render, element, htmlelement
@@ -323,6 +357,7 @@ export function renderMathInElement(
   optionsPrivate.renderToMarkup ??= convertLatexToMarkup;
   optionsPrivate.renderToMathML ??= convertLatexToMathMl;
   optionsPrivate.renderToSpeakableText ??= convertLatexToSpeakableText;
+  optionsPrivate.serializeToLatex ??= serializeMathJsonToLatex;
   autoRenderMathInElement(el, optionsPrivate);
 }
 

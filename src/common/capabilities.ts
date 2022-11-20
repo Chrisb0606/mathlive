@@ -14,11 +14,16 @@ export function throwIfNotInBrowser(): void {
 }
 
 export function isTouchCapable(): boolean {
-  console.log(" isTouchCapable isBrowser",isBrowser(),"matchMedia:",window.matchMedia?.('(any-pointer: coarse)').matches)
-  return (
-    (isBrowser() && window.matchMedia?.('(any-pointer: coarse)').matches) ??
-    false
+  console.log(
+    ' isTouchCapable isBrowser',
+    isBrowser(),
+    'matchMedia:',
+    window.matchMedia?.('(any-pointer: coarse)').matches
   );
+  if (!isBrowser()) return false;
+  if ('matchMedia' in globalThis)
+    return globalThis.matchMedia('(any-pointer: coarse)').matches;
+  return 'ontouchstart' in globalThis || navigator.maxTouchPoints > 0;
 }
 
 export function canVibrate(): boolean {
