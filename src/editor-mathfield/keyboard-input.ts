@@ -210,8 +210,7 @@ export function onKeystroke(
       let result = false;
       if (
         contentWillChange(model, {
-          inputType: 'insertLineBreak',
-          comingFromKeyboard: true, //MODIF CB
+          inputType: 'insertLineBreakFromKeyboard',
         })
       ) {
         // No matching keybinding: trigger a commit
@@ -234,8 +233,7 @@ export function onKeystroke(
 
         // Dispatch an 'input' event matching the behavior of `<textarea>`
         contentDidChange(model, {
-          inputType: 'insertLineBreak',
-          comingFromKeyboard: true, //MODIF CB
+          inputType: 'insertLineBreakFromKeyboard',
         });
       }
       return result;
