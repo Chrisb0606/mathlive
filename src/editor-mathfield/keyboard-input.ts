@@ -208,7 +208,12 @@ export function onKeystroke(
     // 4.4 Handle the return/enter key
     if (!selector && (keystroke === '[Enter]' || keystroke === '[Return]')) {
       let result = false;
-      if (contentWillChange(model, { inputType: 'insertLineBreak' })) {
+      if (
+        contentWillChange(model, {
+          inputType: 'insertLineBreak',
+          comingFromKeyboard: true, //MODIF CB
+        })
+      ) {
         // No matching keybinding: trigger a commit
 
         if (mathfield.host) {
@@ -230,7 +235,6 @@ export function onKeystroke(
         // Dispatch an 'input' event matching the behavior of `<textarea>`
         contentDidChange(model, {
           inputType: 'insertLineBreak',
-          comingFromKeyboard: true, //MODIF CB
         });
       }
       return result;
