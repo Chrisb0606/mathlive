@@ -228,7 +228,10 @@ export function onKeystroke(
         }
 
         // Dispatch an 'input' event matching the behavior of `<textarea>`
-        contentDidChange(model, { inputType: 'insertLineBreak' });
+        contentDidChange(model, {
+          inputType: 'insertLineBreak',
+          comingFromKeyboard: true, //MODIF CB
+        });
       }
       return result;
     }

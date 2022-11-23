@@ -607,6 +607,7 @@ export type ContentChangeOptions = {
   dataTransfer?: DataTransfer | null;
   inputType?: ContentChangeType;
   isComposing?: boolean;
+  comingFromKeyboard?: boolean; //MODIF CB
 };
 
 export type KeyboardOptions = {
