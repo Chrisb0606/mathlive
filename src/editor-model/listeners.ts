@@ -48,7 +48,6 @@ export function contentDidChange(
       ...options,
       bubbles: true,
       composed: true,
-      comingFromKeyboard: true, //MODIF CB
     })
   );
   model.suppressChangeNotifications = false;
