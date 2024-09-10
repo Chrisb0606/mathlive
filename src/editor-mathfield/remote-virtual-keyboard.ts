@@ -150,8 +150,8 @@ export class VirtualKeyboardDelegate implements VirtualKeyboardInterface {
   }
 
   private sendMessage(action: string, payload: any = {}): boolean {
-    if (globalThis) {
-      globalThis.postMessage(
+    if (globalThis.parent) {
+      globalThis.parent.postMessage(
         {
           type: POST_MESSAGE_TYPE,
           action,
