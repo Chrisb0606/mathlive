@@ -1,8 +1,11 @@
-import type { InlineShortcutDefinition } from '../public/options';
-import { LETTER } from '../core-definitions/definitions';
+import type {
+  InlineShortcutDefinition,
+  InlineShortcutDefinitions,
+} from '../public/options';
+import { LETTER } from '../latex-commands/definitions-utils';
 import type { Atom } from '../core/atom';
 
-export { InlineShortcutDefinition };
+export { InlineShortcutDefinition, InlineShortcutDefinitions };
 
 /**
  *
@@ -39,7 +42,7 @@ function validateShortcut(
   // Find first sibling left which is not a placeholder or subsup
   let sibling = siblings[0]; // sibling immediately left
   let index = 0;
-  while (sibling && /msubsup|placeholder/.test(sibling.type)) {
+  while (sibling?.type && /^(subsup|placeholder)$/.test(sibling.type)) {
     index += 1;
     sibling = siblings[index];
   }
@@ -54,7 +57,10 @@ function validateShortcut(
     surd = sibling.type === 'surd';
     binop = sibling.type === 'mbin';
     relop = sibling.type === 'mrel';
-    operator = sibling.type === 'mop';
+    operator =
+      sibling.type === 'mop' ||
+      sibling.type === 'operator' ||
+      sibling.type === 'extensible-symbol';
     punct = sibling.type === 'mpunct' || sibling.type === 'minner';
     array = sibling.type === 'array';
     openfence = sibling.type === 'mopen';
@@ -96,7 +102,7 @@ function validateShortcut(
 export function getInlineShortcut(
   context: null | Atom[],
   s: string,
-  shortcuts?: Record<string, InlineShortcutDefinition>
+  shortcuts?: InlineShortcutDefinitions
 ): string {
   if (!shortcuts) return '';
   return validateShortcut(context, shortcuts[s]);

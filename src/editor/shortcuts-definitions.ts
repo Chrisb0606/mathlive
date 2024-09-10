@@ -1,15 +1,18 @@
-import type { InlineShortcutDefinition } from '../public/options';
+import type { InlineShortcutDefinitions } from '../public/options';
 
 /**
  * These shortcut strings are replaced with the corresponding LaTeX expression
  * without requiring an escape sequence or command.
  */
-export const INLINE_SHORTCUTS: Record<string, InlineShortcutDefinition> = {
+export const INLINE_SHORTCUTS: InlineShortcutDefinitions = {
   '&': '\\&',
   '%': '\\%',
+  '$': '\\$',
 
   // Primes
   "''": '^{\\doubleprime}',
+  "'''": '^{\\prime\\prime\\prime}',
+  "''''": '^{\\prime\\prime\\prime\\prime}',
 
   // Greek letters
   'alpha': '\\alpha',
@@ -130,6 +133,12 @@ export const INLINE_SHORTCUTS: Record<string, InlineShortcutDefinition> = {
   'xin': {
     after: 'nothing+text+relop+punct+openfence+space',
     value: 'x \\in',
+  },
+  // The shortcut for `\int` is interfering with `\sin x`
+  'sint': {
+    after:
+      'nothing+digit+function+frac+surd+binop+relop+punct+array+openfence+closefence+space+text',
+    value: '\\sin t',
   },
   'in': {
     after: 'nothing+letter+closefence',
@@ -260,7 +269,8 @@ export const INLINE_SHORTCUTS: Record<string, InlineShortcutDefinition> = {
   'argmin': '\\operatorname*{arg~min}_{#?}',
   'argmax': '\\operatorname*{arg~max}_{#?}',
   'det': '\\det',
-  'mod': '\\mod',
+  'mod': '\\bmod{#?}',
+  '(mod': '\\pmod{#?}',
   'max': '\\max',
   'min': '\\min',
 
@@ -305,6 +315,7 @@ export const INLINE_SHORTCUTS: Record<string, InlineShortcutDefinition> = {
   '+...': '+\\cdots', // ... but use \cdots after + ...
   '-...': '-\\cdots', // ... - and ...
   '->...': '\\to\\cdots', // ->
+  '-->...': '\\longrightarrow\\cdots',
 
   '->': '\\to',
   '|->': '\\mapsto',
@@ -325,89 +336,93 @@ export const INLINE_SHORTCUTS: Record<string, InlineShortcutDefinition> = {
   // '(-)':                  '\\circleddash',
 
   '||': '\\Vert',
-  '{': '\\{',
-  '}': '\\}',
 
   '*': '\\cdot',
 
-  /*
-    //
-    // ASCIIIMath
-    //
-    // Binary operation symbols
-    '**':                   '\\ast',
-    '***':                  '\\star',
-    '//':                   '\\slash',
-    '\\\\':                 '\\backslash',
-    'setminus':             '\\backslash',
-    '|><':                  '\\ltimes',
-    '><|':                  '\\rtimes',
-    '|><|':                 '\\bowtie',
-    '-:':                   '\\div',
-    'divide':               '\\div',
-    '@':                    '\\circ',
-    'o+':                   '\\oplus',
-    'ox':                   '\\otimes',
-    'o.':                   '\\odot',
-    '^^':                   '\\wedge',
-    '^^^':                  '\\bigwedge',
-    'vv':                   '\\vee',
-    'vvv':                  '\\bigvee',
-    'nn':                   '\\cap',
-    'nnn':                  '\\bigcap',
-    'uu':                   '\\cup',
-    'uuu':                  '\\bigcup',
+  //
+  // ASCIIIMath
+  //
+  // Binary operation symbols
+  //
+  '**': '\\star',
+  '***': '\\ast',
+  '//': '\\slash',
+  '\\\\': '\\backslash',
+  'setminus': '\\backslash',
+  '|><': '\\ltimes',
+  '><|': '\\rtimes',
+  '|><|': '\\bowtie',
+  '-:': '\\div',
+  'divide': '\\div',
+  '@': '\\circ',
+  // 'o+': '\\oplus',
+  // 'ox': '\\otimes',
+  // 'o.': '\\odot',
+  '^^': '\\wedge',
+  '^^^': '\\bigwedge',
+  'vv': '\\vee',
+  'vvv': '\\bigvee',
+  'nn': '\\cap',
+  'nnn': '\\bigcap',
+  'uu': '\\cup',
+  'uuu': '\\bigcup',
 
-    // Binary relation symbols
-    '-=':                   '\\equiv',
-    '~=':                   '\\cong',
-    'lt':                   '<',
-    'lt=':                  '\\leq',
-    'gt':                   '>',
-    'gt=':                  '\\geq',
-    '-<':                   '\\prec',
-    '-lt':                  '\\prec',
-    '-<=':                  '\\preceq',
-    // '>-':                   '\\succ',
-    '>-=':                  '\\succeq',
-    'prop':                 '\\propto',
-    'diamond':              '\\diamond',
-    'square':               '\\square',
-    'iff':                  '\\iff',
+  // Binary relation symbols
+  '-=': '\\equiv',
+  '~=': '\\cong',
+  'lt': '<',
+  'lt=': '\\leq',
+  'gt': '>',
+  'gt=': '\\geq',
+  '-<': '\\prec',
+  '-lt': '\\prec',
+  '-<=': '\\preceq',
+  // '>-':                   '\\succ',
+  '>-=': '\\succeq',
+  'prop': '\\propto',
+  'diamond': '\\diamond',
+  'square': '\\square',
+  'iff': '\\iff',
 
-    'sub':                  '\\subset',
-    'sup':                  '\\supset',
-    'sube':                 '\\subseteq',
-    'supe':                 '\\supseteq',
-    'uarr':                 '\\uparrow',
-    'darr':                 '\\downarrow',
-    'rarr':                 '\\rightarrow',
-    'rArr':                 '\\Rightarrow',
-    'larr':                 '\\leftarrow',
-    'lArr':                 '\\Leftarrow',
-    'harr':                 '\\leftrightarrow',
-    'hArr':                 '\\Leftrightarrow',
-    'aleph':                '\\aleph',
+  'sub': '\\subset',
+  'sup': '\\supset',
+  'sube': '\\subseteq',
+  'supe': '\\supseteq',
+  'uarr': '\\uparrow',
+  'darr': '\\downarrow',
+  'rarr': '\\rightarrow',
+  'rArr': '\\Rightarrow',
+  'larr': '\\leftarrow',
+  'lArr': '\\Leftarrow',
+  'harr': '\\leftrightarrow',
+  'hArr': '\\Leftrightarrow',
+  'aleph': '\\aleph',
 
-    // Logic
-    'and':                  '\\land',
-    'or':                   '\\lor',
-    'not':                  '\\neg',
-    '_|_':                   '\\bot',
-    'TT':                   '\\top',
-    '|--':                  '\\vdash',
-    '|==':                  '\\models',
-    
-    // Other functions
-    '|__':                  '\\lfloor',
-    '__|':                  '\\rfloor',
+  // Logic
+  'and': '\\land',
+  'or': '\\lor',
+  'not': '\\neg',
+  '_|_': '\\bot',
+  'TT': '\\top',
+  '|--': '\\vdash',
+  '|==': '\\models',
 
-    '|~':                   '\\lceil',
-    '~|':                   '\\rceil',
+  // Other functions
+  '|__': '\\lfloor',
+  '__|': '\\rfloor',
 
-    // Arrows
-    '>->':                   '\\rightarrowtail',
-    '->>':                   '\\twoheadrightarrow',
-    '>->>':                  '\\twoheadrightarrowtail'
-*/
+  '|~': '\\lceil',
+  '~|': '\\rceil',
+
+  // Arrows
+  '>->': '\\rightarrowtail',
+  '->>': '\\twoheadrightarrow', // \char"21A0
+  '>->>': '\\twoheadrightarrowtail', // \char"2916
+
+  //
+  // Desmos Graphing Calculator
+  //
+  'frac': '\\frac{#?}{#?}',
+  'cbrt': '\\sqrt[3]{#?}',
+  'nthroot': '\\sqrt[#?]{#?}',
 };

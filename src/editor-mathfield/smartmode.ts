@@ -1,14 +1,11 @@
-import {
-  eventToChar,
-  mightProducePrintableCharacter,
-} from '../editor/keyboard';
-import { contentDidChange } from '../editor-model/listeners';
-import type { MathfieldPrivate } from './mathfield-private';
+import { keyboardEventToChar } from '../editor/keyboard';
+import type { _Mathfield } from './mathfield-private';
 
-import { ModelPrivate } from '../editor-model/model-private';
+import { _Model } from '../editor-model/model-private';
 import { Atom } from '../core/atom-class';
-import { LeftRightAtom } from '../core-atoms/leftright';
+import { LeftRightAtom } from '../atoms/leftright';
 import { joinLatex } from '../core/tokenizer';
+import { mightProducePrintableCharacter } from '../ui/events/utils';
 
 /**
  * Convert the atoms before the anchor to 'text' mode
@@ -17,7 +14,7 @@ import { joinLatex } from '../core/tokenizer';
  * @private
  */
 function convertLastAtomsToText(
-  model: ModelPrivate,
+  model: _Model,
   count?: number | ((a: Atom) => boolean),
   until?: (a: Atom) => boolean
 ): void {
@@ -36,10 +33,11 @@ function convertLastAtomsToText(
     done =
       count === 0 ||
       atom === undefined ||
+      atom.type === 'first' ||
       atom.mode !== 'math' ||
       !(
-        /mord|textord|mpunct/.test(atom.type) ||
-        (atom.type === 'mop' && /[a-zA-Z]+/.test(atom.value))
+        (atom.type && /mord|mpunct|operator/.test(atom.type)) ||
+        (atom.type === 'mop' && /[a-zA-Z ]+/.test(atom.value))
       ) ||
       !atom.hasEmptyBranch('superscript') ||
       !atom.hasEmptyBranch('subscript') ||
@@ -55,7 +53,7 @@ function convertLastAtomsToText(
     count -= 1;
   }
 
-  contentDidChange(model, { data: text, inputType: 'insertText' });
+  model.contentDidChange({ data: text, inputType: 'insertText' });
 }
 
 /**
@@ -65,9 +63,9 @@ function convertLastAtomsToText(
  * @private
  */
 function convertLastAtomsToMath(
-  model: ModelPrivate,
+  model: _Model,
   count?: number,
-  until?
+  until?: (arg: Atom) => boolean
 ): void {
   if (typeof count === 'function') {
     until = count;
@@ -84,12 +82,13 @@ function convertLastAtomsToMath(
     done =
       count === 0 ||
       !atom ||
+      atom.type === 'first' ||
       atom.isFirstSibling ||
       atom.mode !== 'text' ||
       atom.value === ' ' ||
-      (until && !until(atom));
+      (typeof until === 'function' && !until(atom));
     if (!done) {
-      data.push(atom.serialize({ defaultMode: 'math' }));
+      data.push(Atom.serialize([atom], { defaultMode: 'math' }));
       atom.mode = 'math';
     }
 
@@ -98,7 +97,7 @@ function convertLastAtomsToMath(
   }
 
   removeIsolatedSpace(model);
-  contentDidChange(model, { data: joinLatex(data), inputType: 'insertText' });
+  model.contentDidChange({ data: joinLatex(data), inputType: 'insertText' });
 }
 
 /**
@@ -106,7 +105,7 @@ function convertLastAtomsToMath(
  * space character is found (i.e. it is surrounded by math zone),
  * remove it.
  */
-export function removeIsolatedSpace(model: ModelPrivate): void {
+export function removeIsolatedSpace(model: _Model): void {
   let i = model.position - 1;
   while (i >= 0 && model.at(i)?.mode === 'math') i -= 1;
 
@@ -124,21 +123,21 @@ export function removeIsolatedSpace(model: ModelPrivate): void {
     // We need to adjust the selection after doing some surgery on the atoms list
     // But we don't want to receive selection notification changes
     // which could have a side effect of changing the mode :(
-    const save = model.suppressChangeNotifications;
-    model.suppressChangeNotifications = true;
+    const save = model.silenceNotifications;
+    model.silenceNotifications = true;
     model.position -= 1;
-    model.suppressChangeNotifications = save;
+    model.silenceNotifications = save;
 
-    contentDidChange(model, { inputType: 'deleteContent' });
+    model.contentDidChange({ inputType: 'deleteContent' });
   }
 }
 
 /**
  * Return the characters before the insertion point that could potentially be
  * turned into text mode.
- * This excludes things like 'mop' (e.g. \sin)
+ * This excludes things like 'operator' (e.g. \sin)
  */
-function getTextBeforePosition(model: ModelPrivate): string {
+function getTextBeforePosition(model: _Model): string {
   // Going backwards, accumulate
   let result = '';
   let i = model.position;
@@ -148,7 +147,7 @@ function getTextBeforePosition(model: ModelPrivate): string {
     done = !(
       atom &&
       (atom.mode === 'text' ||
-        (atom.mode === 'math' && /mord|textord|mpunct/.test(atom.type)))
+        (atom.mode === 'math' && atom.type && /mord|mpunct/.test(atom.type)))
     );
     if (!done) result = atom.value + result;
 
@@ -167,13 +166,14 @@ function getTextBeforePosition(model: ModelPrivate): string {
  */
 
 export function smartMode(
-  mathfield: MathfieldPrivate,
+  mathfield: _Mathfield,
   keystroke: string,
   evt?: KeyboardEvent
 ): boolean {
-  if (mathfield.smartModeSuppressed) return false;
-
   const { model } = mathfield;
+
+  if (model.mode === 'latex') return false;
+
   // Are we at the end of a group?
   if (!model.at(model.position).isLastSibling) return false;
 
@@ -181,10 +181,10 @@ export function smartMode(
   // (i.e. not an arrow key, etc...)
   if (!evt || !mightProducePrintableCharacter(evt)) return false;
 
-  const c = eventToChar(evt);
+  const c = keyboardEventToChar(evt);
   if (!model.selectionIsCollapsed) {
     // There is a selection
-    if (mathfield.mode === 'text') {
+    if (mathfield.model.mode === 'text') {
       // If the character is '/' or '_' or '^', switch to 'math'
       if (/[/_^]/.test(c)) return true;
     }
@@ -193,7 +193,7 @@ export function smartMode(
   }
 
   const context = getTextBeforePosition(model) + c;
-  if (mathfield.mode === 'text') {
+  if (mathfield.model.mode === 'text') {
     // We're in text mode. Should we switch to math?
     if (keystroke === 'Esc' || /[/\\]/.test(c)) {
       // If this is a command for a fraction,
@@ -255,7 +255,7 @@ export function smartMode(
       atom.style.variant = 'normal'; // @revisit. Was 'auto'. Check for proper conversion.
       atom.command = '\\cdot';
       atom.verbatimLatex = undefined;
-      contentDidChange(model, { data: '\\cdot', inputType: 'insertText' });
+      model.contentDidChange({ data: '\\cdot', inputType: 'insertText' });
       return true;
     }
 

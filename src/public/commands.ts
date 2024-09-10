@@ -1,13 +1,7 @@
 import type { Keys } from './types-utils';
 
-import type { ParseMode, Style } from './core';
-import type {
-  InsertOptions,
-  Mathfield,
-  Model,
-  VirtualKeyboardInterface,
-} from './mathfield';
-import { VirtualKeyboardTheme } from './options';
+import type { ParseMode, Style, TabularEnvironment } from './core-types';
+import type { InsertOptions, Mathfield, Model } from './mathfield';
 
 /**
  * How much of the formula should be spoken:
@@ -19,8 +13,9 @@ import { VirtualKeyboardTheme } from './options';
  * | `right` | the element to the right of the selection |
  * | `group` | the group (numerator, root, etc..) the selection is in |
  * | `parent` | the parent of the selection |
+ *
+ * @category Speech
  */
-
 export type SpeechScope =
   | 'all'
   | 'selection'
@@ -31,7 +26,7 @@ export type SpeechScope =
 
 // @revisit: maybe a command attribute instead?
 /**
- * Use with [[Mathfield.executeCommand]] or [[MathfieldElement.executeCommand]].
+ * To perform editing commands on a mathfield, use {@linkcode MathfieldElement.executeCommand} with the commands below.
  *
  * ```ts
  * const mf = document.getElementById('mathfield');
@@ -40,6 +35,7 @@ export type SpeechScope =
  * ```
  *
  * Commands return true if they resulted in a dirty state.
+ * @category Commands
  * @command executeCommand
  */
 export interface Commands {
@@ -58,6 +54,13 @@ export interface Commands {
    * for example for commands from the virtual keyboard
    */
   performWithFeedback: (mathfield: Mathfield, command: string) => boolean;
+
+  /** Dispatch a custom event on the host (mathfield) */
+  dispatchEvent: (
+    mathfield: Mathfield,
+    name: string,
+    detail: number
+  ) => boolean;
 
   commit: (mathfield: Mathfield) => boolean;
 
@@ -100,6 +103,7 @@ export interface Commands {
    */
   scrollToEnd: (mathfield: Mathfield) => boolean;
 
+  toggleContextMenu: (mathfield: Mathfield) => boolean;
   toggleKeystrokeCaption: (mathfield: Mathfield) => boolean;
 
   plonk: (mathfield: Mathfield) => boolean;
@@ -135,6 +139,15 @@ export interface Commands {
   ) => boolean;
 
   /**
+   * @category Prompt
+   */
+  insertPrompt: (
+    mathfield: Mathfield,
+    id?: string,
+    options?: InsertOptions
+  ) => boolean;
+
+  /**
    * @category Array
    */
   addRowAfter: (model: Model) => boolean;
@@ -158,7 +171,10 @@ export interface Commands {
    * @category Array
    */
   removeColumn: (model: Model) => boolean;
-
+  /**
+   * @category Array
+   */
+  setEnvironment: (model: Model, environment: TabularEnvironment) => boolean;
   /**
    * @category Deleting
    */
@@ -256,11 +272,19 @@ export interface Commands {
   /**
    * @category Selection
    */
-  moveToMathFieldStart: (model: Model) => boolean;
+  moveToNextGroup: (model: Model) => boolean;
   /**
    * @category Selection
    */
-  moveToMathFieldEnd: (model: Model) => boolean;
+  moveToPreviousGroup: (model: Model) => boolean;
+  /**
+   * @category Selection
+   */
+  moveToMathfieldStart: (model: Model) => boolean;
+  /**
+   * @category Selection
+   */
+  moveToMathfieldEnd: (model: Model) => boolean;
   /**
    * @category Selection
    */
@@ -328,25 +352,7 @@ export interface Commands {
   extendToMathFieldEnd: (model: Model) => boolean;
 
   applyStyle: (mathfield: Mathfield, style: Style) => boolean;
-
-  /**
-   * @category Virtual Keyboard
-   */
-  toggleVirtualKeyboard: (
-    keyboard: VirtualKeyboardInterface,
-    theme: VirtualKeyboardTheme
-  ) => boolean;
-  /**
-   * @category Virtual Keyboard
-   */
-  hideVirtualKeyboard: (keyboard: VirtualKeyboardInterface) => boolean;
-  /**
-   * @category Virtual Keyboard
-   */
-  showVirtualKeyboard: (
-    keyboard: VirtualKeyboardInterface,
-    theme: VirtualKeyboardTheme
-  ) => boolean;
 }
 
+/** @category Commands */
 export type Selector = Keys<Commands>;

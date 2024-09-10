@@ -67,3 +67,42 @@ Once your pull request has been accepted, it will be merged into the master
 branch.
 
 Congratulations, you've become a MathLive contributor! Thanks for your help!
+
+## Build Instructions
+
+Before you can do a local build of MathLive, you need to have the following
+dependencies installed:
+- [npm](https://www.npmjs.com/), which will also install [Node.js](https://nodejs.org)
+- [Playwright](https://playwright.dev/), to run the test suite
+- If you're using Windows, you will need to install the `bash` shell. The `bash` shell is
+  required and pre-installed on macOS and Linux. For instructions
+  on how to install `bash` on Windows, see the [this article](https://www.howtogeek.com/249966/how-to-install-and-use-the-linux-bash-shell-on-windows-10/)
+
+Now that you have the dependencies installed, you can [fork and clone](https://docs.github.com/en/get-started/quickstart/fork-a-repo) this repository. 
+
+Then, in the cloned project folder, use the following commands to start a local dev server:
+``` bash
+# Install dependencies
+npm install
+
+# Run local dev server with live reload
+# After running this command, point your browser to http://127.0.0.1:9029/dist/smoke/
+npm run start
+```
+
+To run the test suite locally, run the following commands (if the dev server is running, close it using Ctrl-C before running these commands):
+``` bash
+# Install playwright browsers
+# This only needs to be done once for each version of playwright
+# Additional installation of browser dependencies may be required, follow instructions
+npx playwright install
+
+# Build the production version of MathLive
+npm run build
+
+# Run test suite
+npm test
+```
+
+Note that, because of how the dev server manages files, `npm run build` needs to be run before
+each `npm test` run. When debugging the Playwright browser tests, the `npx playwright test` command can be used to run only the Playwright tests. When running the Playwright tests directly, `npm run build` is not required. Also, the Playwright tests, when run with `npx playwright test`, can be run while the dev server is running.

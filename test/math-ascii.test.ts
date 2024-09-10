@@ -1,9 +1,12 @@
-import { debug } from '../src/mathlive';
+import {
+  convertLatexToAsciiMath,
+  convertAsciiMathToLatex,
+} from '../src/public/mathlive-ssr';
 
 function equalASCIIMath(latex: string, ascii: string) {
   test(latex, () => {
-    expect(debug.latexToAsciiMath(latex)).toBe(ascii);
-    expect(debug.asciiMathToLatex(ascii)).toBe(latex);
+    expect(convertLatexToAsciiMath(latex)).toBe(ascii);
+    expect(convertAsciiMathToLatex(ascii)).toBe(latex);
   });
 }
 
@@ -17,11 +20,11 @@ describe('ASCII MATH', function () {
   equalASCIIMath('npq', 'npq');
   equalASCIIMath('2npq', '2npq');
 
-  expect(debug.latexToAsciiMath('(x)')).toBe('(x)');
-  expect(debug.asciiMathToLatex('(x)')).toBe('\\left(x\\right)');
+  expect(convertLatexToAsciiMath('(x)')).toBe('(x)');
+  expect(convertAsciiMathToLatex('(x)')).toBe('\\left(x\\right)');
 
-  expect(debug.latexToAsciiMath('(x + 1)')).toBe('(x+1)');
-  expect(debug.asciiMathToLatex('(x + 1)')).toBe('\\left(x +1\\right)');
+  expect(convertLatexToAsciiMath('(x + 1)')).toBe('(x+1)');
+  expect(convertAsciiMathToLatex('(x + 1)')).toBe('\\left(x+1\\right)');
 
   equalASCIIMath('f\\left(x\\right)=\\sin x', 'f(x)=sin x');
 
@@ -53,10 +56,15 @@ describe('ASCII MATH', function () {
   equalASCIIMath('\\Gamma +1', 'Gamma+1');
   equalASCIIMath('\\frac{\\pi }{2\\pi }', '(pi)/(2pi)');
 
-  equalASCIIMath('\\text{if }x>0', '"if "x>0');
+  equalASCIIMath('x\\in \\R ', 'x in RR');
+
+  // Avoid collisions with digits
+  expect(convertLatexToAsciiMath('1^2 3^4')).toBe('1^2 3^4');
+
+  equalASCIIMath('\\text{if }x>0', '"if " x>0');
   equalASCIIMath(
     '\\text{if }x>0\\text{ then }f\\left(x\\right)=x^{2}',
-    '"if "x>0" then "f(x)=x^2'
+    '"if " x>0" then " f(x)=x^2'
   );
   // equalASCIIMath('\\begin{pmatrix}a & b & c\\end{pmatrix}', '((a),(b),(c))');
 
@@ -69,4 +77,8 @@ describe('ASCII MATH', function () {
   //   '\\begin{bmatrix}a & b & c \\\\ d & e & f\\end{bmatrix}',
   //   '[[a],[b],[c],[d],[e],[f]]'
   // );
+
+  equalASCIIMath('\\left\\lbrack1,1\\right\\rbrack', '[1,1]');
+  equalASCIIMath('\\left\\lbrace1,1\\right\\rbrace', '{1,1}');
+  equalASCIIMath('\\left(1,1\\right)', '(1,1)');
 });

@@ -6,37 +6,22 @@
  */
 
 import { splitGraphemes } from './grapheme-splitter';
-
-// The 'special' tokens must be of length > 1 to distinguish
-// them from literals.
-// '<space>': whitespace
-// '<$$>'   : display math mode shift
-// '<$>'    : inline math mode shift
-// '<{>'    : begin group
-// '<}>'    : end group
-// '#0'-'#9': argument
-// '#?'     : placeholder
-// '\' + ([a-zA-Z\*]+)|([^a-zAz\*])  : command
-// other (length = 1)   : literal
-//  See: [TeX:289](http://tug.org/texlive/devsrc/Build/source/texk/web2c/tex.web)
-export type Token = string;
+import type { Token } from '../public/core-types';
 
 /**
- * Given a LaTeX expression represented as a character string,
- * the Lexer class will scan and return Tokens for the lexical
+ * Given a LaTeX string, the Tokenizer will return Tokens for the lexical
  * units in the string.
  *
- * @param s A string of LaTeX
+ * @param s A LaTeX string
  */
 class Tokenizer {
-  obeyspaces: boolean;
+  obeyspaces = false;
+
   private readonly s: string | string[];
-  private pos: number;
+  private pos = 0;
 
   constructor(s: string) {
     this.s = splitGraphemes(s);
-    this.pos = 0;
-    this.obeyspaces = false;
   }
 
   /**
@@ -64,7 +49,7 @@ class Tokenizer {
    * Return the next substring matching regEx and advance.
    */
   match(regEx: RegExp): string {
-    // This.s can either be a string, if it's made up only of ASCII chars
+    // This can either be a string, if it's made up only of ASCII chars
     // or an array of graphemes, if it's more complicated.
     const execResult: (string | null)[] | null =
       typeof this.s === 'string'
@@ -84,9 +69,10 @@ class Tokenizer {
   next(): Token | null {
     // If we've reached the end, exit
     if (this.end()) return null;
+
     // Handle white space
-    // In text mode, spaces are significant,
-    // however they are coalesced unless \obeyspaces
+    // In text mode, spaces are significant, however they are coalesced
+    // unless \obeyspaces
     if (!this.obeyspaces && this.match(/^[ \f\n\r\t\v\u00A0\u2028\u2029]+/)) {
       // Note that browsers are inconsistent in their definitions of the
       // `\s` metacharacter, so we use an explicit pattern instead.
@@ -106,7 +92,8 @@ class Tokenizer {
     }
 
     if (this.obeyspaces && this.match(/^[ \f\n\r\t\v\u00A0\u2028\u2029]/)) {
-      // Don't coalesce when this.obeyspaces is true (different regex from above)
+      // Don't coalesce when this.obeyspaces is true (different regex
+      // from above)
       return '<space>';
     }
 
@@ -123,10 +110,6 @@ class Tokenizer {
         } else {
           // ... or a single non-letter character
           command = this.get();
-          if (command === ' ') {
-            // The `\ ` command is equivalent to a single space
-            return '<space>';
-          }
         }
 
         return '\\' + command;
@@ -197,8 +180,8 @@ class Tokenizer {
 // (the 'gullet')
 function expand(
   lex: Tokenizer,
-  args: null | ((arg: string) => string)
-): Token[] {
+  args: null | ((arg: string) => string | undefined)
+): Readonly<Token[]> {
   const result: Token[] = [];
   let token = lex.next();
   if (token) {
@@ -209,12 +192,7 @@ function expand(
       token = lex.next();
       if (token) result.push(token);
     } else if (token === '\\obeyspaces') lex.obeyspaces = true;
-    else if (token === '\\space' || token === '~') {
-      // The `\space` command is equivalent to a single space
-      // The ~ is an 'active character' (a single character macro)
-      // that maps to <space>
-      result.push('<space>');
-    } else if (token === '\\bgroup') {
+    else if (token === '\\bgroup') {
       // Begin group, synonym for opening brace
       result.push('<{>');
     } else if (token === '\\egroup') {
@@ -299,21 +277,22 @@ function expand(
  */
 export function tokenize(
   s: string,
-  args: null | ((arg: string) => string) = null
+  args: null | ((arg: string) => string | undefined) = null
 ): Token[] {
+  if (!s) return [];
   // Merge multiple lines into one, and remove comments
-  const stream: string[] = [];
+  const lines: string[] = [];
   let sep = '';
   for (const line of s.toString().split(/\r?\n/)) {
-    if (sep) stream.push(sep);
+    if (sep) lines.push(sep);
     sep = ' ';
     // Remove everything after a % (comment marker)
     // (but \% should be preserved...)
     const m = line.match(/((?:\\%)|[^%])*/);
-    if (m !== null) stream.push(m[0]);
+    if (m !== null) lines.push(m[0]);
   }
 
-  const tokenizer = new Tokenizer(stream.join(''));
+  const tokenizer = new Tokenizer(lines.join(''));
   const result: Token[] = [];
   do result.push(...expand(tokenizer, args));
   while (!tokenizer.end());
@@ -321,20 +300,23 @@ export function tokenize(
   return result;
 }
 
-export function joinLatex(segments: string[]): string {
+export function joinLatex(segments: Readonly<string[]>): string {
   let sep = '';
   const result: string[] = [];
   for (const segment of segments) {
     if (segment) {
       // If the segment begins with a char that *could* be in a command
       // name... insert a separator (if one was needed for the previous segment)
-      if (/[a-zA-Z\*]/.test(segment[0])) result.push(sep);
+      if (sep && /^[a-zA-Z\*]/.test(segment)) result.push(sep);
 
       result.push(segment);
 
-      if (/\\[a-zA-Z]+\*?[\"\'][^\ ]+$/.test(segment)) result.push(' ');
+      // If the segment is a command with an unbraced argument using a hex
+      // number, add a separator now.
+      if (/^\\[a-zA-Z]+\*?[\"\'][^\ ]+$/.test(segment)) result.push(' ');
 
-      // If the segment ends in a command...
+      // If the segment ends in a command, we may need a separator for
+      // the next segment
       sep = /\\[a-zA-Z]+\*?$/.test(segment) ? ' ' : '';
     }
   }
@@ -342,18 +324,39 @@ export function joinLatex(segments: string[]): string {
   return result.join('');
 }
 
+/**
+ * Return a LaTeX fragment given a command and its arguments.
+ * Note that `command` may include optional arguments, e.g. `\\bbox[red]`
+ */
+export function latexCommand(
+  command: string,
+  ...args: Readonly<string[]>
+): string {
+  console.assert(command.startsWith('\\'));
+
+  if (args.length === 0) return command;
+
+  // While TeX (Knuth) tends to minimize the use of braces, e.g. prefering
+  // `\frac xy` over `\frac{x}{y}` we are implementing the more conservative
+  // LaTeX convention that use braces by default.
+  // Note that the custom serializer for `\frac` does omit braces when
+  // both arguments are digits, i.e. `\frac34`.
+  // See a discussion on this topic here: https://tex.stackexchange.com/questions/82329/how-bad-for-tex-is-omitting-braces-even-if-the-result-is-the-same
+
+  return joinLatex([command, ...args.map((x) => `{${x}}`)]);
+}
+
 export function tokensToString(tokens: Token[]): string {
   return joinLatex(
-    tokens.map((token) => {
-      return (
-        {
+    tokens.map(
+      (token) =>
+        ({
           '<space>': ' ',
           '<$$>': '$$',
           '<$>': '$',
           '<{>': '{',
           '<}>': '}',
-        }[token] ?? token
-      );
-    })
+        })[token] ?? token
+    )
   );
 }

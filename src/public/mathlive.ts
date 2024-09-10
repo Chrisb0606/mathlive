@@ -1,65 +1,55 @@
 /**
  *
- * Use MathLive to render and edit mathematical formulas.
+ * Importing this package in a web page will make the `<math-field>` custom
+ * element available. Use it as a drop-in replacement for `<textarea>` or
+ * `<input type="text">` to allow the user to type and edit mathematical
+ * expressions.
  *
  *
  * @example
- * <script type="module">
- * // Load the `MathLive` module from a CDN
- * import { convertLatexToSpeakableText } from 'https://unpkg.com/mathlive?module';
  *
- * console.log(convertLatexToSpeakableText('e^{i\\pi}+1=0'));
+ * ```html
+ * <script src="https://unpkg.com/mathlive"></script>
+ *  <math-field>\frac{1}{2}</math-field>
+ * <script>
+ * const mf = document.querySelector('math-field');
+ * mf.addEventListener('input', (ev) => {
+ *  console.log('New value:', mf.value);
+ * });
  * </script>
+ * ```
  *
- * @packageDocumentation MathLive SDK Reference {{SDK_VERSION}}
+ * @packageDocumentation Mathfield API Reference
  * @version {{SDK_VERSION}}
  *
  */
 
-import {
-  RemoteVirtualKeyboardOptions,
-  TextToSpeechOptions,
-  AutoRenderOptions,
-} from './options';
+import type { VirtualKeyboardInterface } from './virtual-keyboard';
+import type { StaticRenderOptions } from './options';
 
 export * from './commands';
-export * from './core';
+export * from './core-types';
 export * from './options';
 export * from './mathfield';
 export * from './mathfield-element';
+export * from './mathlive-ssr';
+export * from './virtual-keyboard';
 
-export declare function makeSharedVirtualKeyboard(
-  options?: Partial<RemoteVirtualKeyboardOptions>
+export declare function renderMathInDocument(
+  options?: StaticRenderOptions
 ): void;
-
-export declare function convertLatexToMarkup(
-  text: string,
-  options?: {
-    mathstyle?: 'displaystyle' | 'textstyle';
-    format?: string;
-  }
-): string;
-
-export declare function convertLatexToMathMl(
-  latex: string,
-  options?: Partial<{
-    generateID: boolean;
-  }>
-): string;
-
-export declare function convertLatexToSpeakableText(
-  latex: string,
-  options?: Partial<TextToSpeechOptions>
-): string;
-
-export declare function renderMathInDocument(options?: AutoRenderOptions): void;
 
 export declare function renderMathInElement(
   element: string | HTMLElement,
-  options?: AutoRenderOptions
+  options?: StaticRenderOptions
 ): void;
 
 export declare const version: {
   mathlive: string;
-  computeEngine: string;
 };
+
+declare global {
+  interface Window {
+    mathVirtualKeyboard: VirtualKeyboardInterface & EventTarget;
+  }
+}

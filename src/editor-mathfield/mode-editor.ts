@@ -1,16 +1,17 @@
-import { TextAtom } from '../core-atoms/text';
-import { ModelPrivate } from '../editor-model/model-private';
+import type { ParseMode } from '../public/core-types';
+import { TextAtom } from '../atoms/text';
+import { _Model } from '../editor-model/model-private';
 import { range } from '../editor-model/selection-utils';
-import { MODE_SHIFT_COMMANDS } from '../editor/parse-math-string';
-import { ParseMode } from '../public/core';
-import { InsertOptions, Range } from '../public/mathfield';
-import { MathfieldPrivate } from './mathfield-private';
+import { MODE_SHIFT_COMMANDS } from '../formats/parse-math-string';
+import { InsertOptions, OutputFormat, Range } from '../public/mathfield';
+import { _Mathfield } from './mathfield-private';
 
 const CLIPBOARD_LATEX_BEGIN = '$$';
 const CLIPBOARD_LATEX_END = '$$';
 
+/** @internal */
 export const defaultExportHook = (
-  _from: MathfieldPrivate,
+  _from: _Mathfield,
   latex: string,
   _range: Range
 ): string => {
@@ -25,29 +26,67 @@ export const defaultExportHook = (
   return latex;
 };
 
+/** @internal */
 export class ModeEditor {
-  static _registry: Record<string, ModeEditor> = {};
+  static _modes: Record<string, ModeEditor> = {};
 
   constructor(name: string) {
-    ModeEditor._registry[name] = this;
+    ModeEditor._modes[name] = this;
   }
 
   static onPaste(
     mode: ParseMode,
-    mathfield: MathfieldPrivate,
-    ev: ClipboardEvent
+    mathfield: _Mathfield,
+    data: DataTransfer | string | null
   ): boolean {
+    if (!mathfield.contentEditable && mathfield.userSelect === 'none') {
+      mathfield.model.announce('plonk');
+      return false;
+    }
+    if (typeof data === 'string') {
+      const dataTransfer = new DataTransfer();
+      dataTransfer.setData('text/plain', data);
+      data = dataTransfer;
+    }
+
     const redispatchedEvent = new ClipboardEvent('paste', {
-      clipboardData: ev.clipboardData,
+      clipboardData: data,
       cancelable: true,
     });
     if (!mathfield.host?.dispatchEvent(redispatchedEvent)) return false;
 
-    return ModeEditor._registry[mode].onPaste(mathfield, ev);
+    return ModeEditor._modes[mode].onPaste(mathfield, data);
   }
 
-  static onCopy(mathfield: MathfieldPrivate, ev: ClipboardEvent): void {
+  /** Call this method from a menu */
+  static copyToClipboard(mathfield: _Mathfield, format: OutputFormat): void {
+    if (!mathfield.contentEditable && mathfield.userSelect === 'none') {
+      mathfield.model.announce('plonk');
+      return;
+    }
+    const model = mathfield.model;
+    const exportRange: Range = model.selectionIsCollapsed
+      ? [0, model.lastOffset]
+      : range(model.selection);
+
+    const latex = model.getValue(exportRange, format);
+
+    navigator.clipboard.writeText(latex).then(
+      () => {
+        /* Resolved - text copied to clipboard successfully */
+      },
+      () => mathfield.model.announce('plonk')
+    );
+  }
+
+  /** Call this method in response to a clipboard event */
+  static onCopy(mathfield: _Mathfield, ev: ClipboardEvent): void {
     if (!ev.clipboardData) return;
+    if (!mathfield.contentEditable && mathfield.userSelect === 'none') {
+      mathfield.model.announce('plonk');
+      return;
+    }
+
     const model = mathfield.model;
     const exportRange: Range = model.selectionIsCollapsed
       ? [0, model.lastOffset]
@@ -102,11 +141,11 @@ export class ModeEditor {
       //
       // 4. Put serialized atoms on clipboard
       //
-      if (
-        atoms.length === 1 &&
-        (atoms[0].type === 'root' || atoms[0].type === 'group')
-      )
-        atoms = atoms[0].body!.filter((x) => x.type !== 'first');
+      if (atoms.length === 1) {
+        const atom = atoms[0];
+        if (atom.type === 'root' || atom.type === 'group')
+          atoms = atom.body!.filter((x) => x.type !== 'first');
+      }
       try {
         ev.clipboardData.setData(
           'application/json+mathlive',
@@ -117,15 +156,22 @@ export class ModeEditor {
       //
       // 5. Put other flavors on the clipboard (MathJSON)
       //
-      const ce = mathfield.computeEngine;
-      if (ce) {
-        try {
-          ce.jsonSerializationOptions = { metadata: ['latex'] };
-          const expr = ce.parse(latex);
+      if (window[Symbol.for('io.cortexjs.compute-engine')]?.ComputeEngine) {
+        const ce = globalThis.MathfieldElement.computeEngine;
+        if (ce) {
+          try {
+            const options = ce.jsonSerializationOptions;
+            ce.jsonSerializationOptions = { metadata: ['latex'] };
+            const expr = ce.parse(
+              model.getValue(exportRange, 'latex-unstyled')
+            );
+            ce.jsonSerializationOptions = options;
 
-          const mathJson = JSON.stringify(expr.json);
-          if (mathJson) ev.clipboardData.setData('application/json', mathJson);
-        } catch {}
+            const mathJson = JSON.stringify(expr.json);
+            if (mathJson)
+              ev.clipboardData.setData('application/json', mathJson);
+          } catch {}
+        }
       }
     }
     // Prevent the current document selection from being written to the clipboard.
@@ -133,24 +179,23 @@ export class ModeEditor {
   }
 
   static insert(
-    mode: ParseMode,
-    model: ModelPrivate,
+    model: _Model,
     text: string,
     options: InsertOptions = {}
   ): boolean {
-    return ModeEditor._registry[mode].insert(model, text, options);
+    const mode =
+      options.mode === 'auto' ? model.mode : options.mode ?? model.mode;
+    return ModeEditor._modes[mode].insert(model, text, options);
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-empty-function
-  onPaste(_mathfield: MathfieldPrivate, _ev: ClipboardEvent): boolean {
+  onPaste(
+    _mathfield: _Mathfield,
+    _data: DataTransfer | string | null
+  ): boolean {
     return false;
   }
 
-  insert(
-    _model: ModelPrivate,
-    _text: string,
-    _options: InsertOptions
-  ): boolean {
+  insert(_model: _Model, _text: string, _options: InsertOptions): boolean {
     return false;
   }
 }

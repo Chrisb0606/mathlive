@@ -1,69 +1,65 @@
 /* eslint-disable no-new */
 import { Offset, Range, InsertOptions } from '../public/mathfield';
-import { Style } from '../public/core';
-import { LatexAtom, LatexGroupAtom } from '../core-atoms/latex';
+import { LatexAtom, LatexGroupAtom } from '../atoms/latex';
 import { range } from '../editor-model/selection-utils';
 import { Atom } from '../core/atom-class';
-import { GlobalContext } from '../core/core';
-import { ModelPrivate } from '../editor-model/model-private';
-import { contentDidChange, contentWillChange } from '../editor-model/listeners';
+import { _Model } from '../editor-model/model-private';
 
-import { MathfieldPrivate } from './mathfield-private';
+import { _Mathfield } from './mathfield-private';
 import { requestUpdate } from './render';
 import { ModeEditor } from './mode-editor';
-import { COMMAND_MODE_CHARACTERS } from '../core-definitions/definitions';
+import { COMMAND_MODE_CHARACTERS } from '../latex-commands/definitions-utils';
 
 export class LatexModeEditor extends ModeEditor {
   constructor() {
     super('latex');
   }
 
-  createAtom(
-    command: string,
-    context: GlobalContext,
-    _style?: Style
-  ): Atom | null {
-    return new LatexAtom(command, context);
+  createAtom(command: string): Atom | null {
+    return new LatexAtom(command);
   }
 
-  onPaste(mathfield: MathfieldPrivate, ev: ClipboardEvent): boolean {
-    if (!ev.clipboardData) return false;
-    let text = ev.clipboardData.getData('text/x-latex');
-    if (!text) text = ev.clipboardData.getData('text/plain');
+  onPaste(mathfield: _Mathfield, data: DataTransfer | string | null): boolean {
+    if (!data) return false;
+    const text =
+      typeof data === 'string'
+        ? data
+        : data.getData('application/x-latex') || data.getData('text/plain');
 
     if (
       text &&
-      contentWillChange(mathfield.model, {
+      mathfield.model.contentWillChange({
         inputType: 'insertFromPaste',
         data: text,
       })
     ) {
-      mathfield.snapshot();
+      mathfield.stopCoalescingUndo();
+      mathfield.stopRecording();
       if (this.insert(mathfield.model, text)) {
-        contentDidChange(mathfield.model, { inputType: 'insertFromPaste' });
+        mathfield.startRecording();
+        mathfield.snapshot('paste');
+        mathfield.model.contentDidChange({ inputType: 'insertFromPaste' });
         requestUpdate(mathfield);
       }
-      ev.preventDefault();
-      ev.stopPropagation();
+      mathfield.startRecording();
       return true;
     }
 
     return false;
   }
 
-  insert(model: ModelPrivate, text: string, options?: InsertOptions): boolean {
-    if (!contentWillChange(model, { data: text, inputType: 'insertText' }))
+  insert(model: _Model, text: string, options?: InsertOptions): boolean {
+    if (!model.contentWillChange({ data: text, inputType: 'insertText' }))
       return false;
     if (!options) options = {};
     if (!options.insertionMode) options.insertionMode = 'replaceSelection';
     if (!options.selectionMode) options.selectionMode = 'placeholder';
 
-    const { suppressChangeNotifications } = model;
-    if (options.suppressChangeNotifications)
-      model.suppressChangeNotifications = true;
+    const { silenceNotifications } = model;
+    if (options.silenceNotifications) model.silenceNotifications = true;
 
-    const savedSuppressChangeNotifications = model.suppressChangeNotifications;
-    model.suppressChangeNotifications = true;
+    const saveSilenceNotifications = model.silenceNotifications;
+    model.silenceNotifications = true;
 
     // Delete any selected items
     if (
@@ -81,15 +77,14 @@ export class LatexModeEditor extends ModeEditor {
 
     // Short-circuit the tokenizer and parser when in LaTeX mode
     const newAtoms: Atom[] = [];
-    for (const c of text) {
-      if (COMMAND_MODE_CHARACTERS.test(c))
-        newAtoms.push(new LatexAtom(c, model.mathfield));
-    }
+    for (const c of text)
+      if (COMMAND_MODE_CHARACTERS.test(c)) newAtoms.push(new LatexAtom(c));
 
     //
     // Insert the new atoms
     //
     let cursor = model.at(model.position);
+
     // In some cases (after a SelectAll command, for example), the cursor
     // can be positoned *after* the LatexGroup. In that case, adjust to be
     // the last atom inside the LatexGroup.
@@ -98,7 +93,7 @@ export class LatexModeEditor extends ModeEditor {
     // If there is no LatexGroup (for example, it was deleted, but we're still
     // in LaTeX mode), insert one.
     if (!(cursor.parent instanceof LatexGroupAtom)) {
-      const group = new LatexGroupAtom('', model.mathfield);
+      const group = new LatexGroupAtom();
       cursor.parent!.addChildAfter(group, cursor);
       cursor = group.firstChild;
     }
@@ -106,7 +101,7 @@ export class LatexModeEditor extends ModeEditor {
     const lastNewAtom = cursor.parent!.addChildrenAfter(newAtoms, cursor);
 
     // Prepare to dispatch notifications
-    model.suppressChangeNotifications = savedSuppressChangeNotifications;
+    model.silenceNotifications = saveSilenceNotifications;
 
     if (options.selectionMode === 'before') {
       // Do nothing: don't change the position.
@@ -114,28 +109,25 @@ export class LatexModeEditor extends ModeEditor {
       model.setSelection(model.anchor, model.offsetOf(lastNewAtom));
     else if (lastNewAtom) model.position = model.offsetOf(lastNewAtom);
 
-    contentDidChange(model, { data: text, inputType: 'insertText' });
+    model.contentDidChange({ data: text, inputType: 'insertText' });
 
-    model.suppressChangeNotifications = suppressChangeNotifications;
+    model.silenceNotifications = silenceNotifications;
 
     return true;
   }
 }
 
-export function getLatexGroup(model: ModelPrivate): LatexGroupAtom | undefined {
-  return model.atoms.find((x) => x instanceof LatexGroupAtom);
+export function getLatexGroup(model: _Model): LatexGroupAtom | undefined {
+  return model.atoms.find((x) => x.type === 'latexgroup') as LatexGroupAtom;
 }
 
-export function getLatexGroupBody(model: ModelPrivate): LatexAtom[] {
-  const atom = model.atoms.find((x) => x instanceof LatexGroupAtom);
-  if (!atom) return [];
-  return (
-    (atom.body?.filter((x) => x instanceof LatexAtom) as LatexAtom[]) ?? []
-  );
+export function getLatexGroupBody(model: _Model): Readonly<LatexAtom[]> {
+  const atom = getLatexGroup(model);
+  return (atom?.body?.filter((x) => x.type === 'latex') as LatexAtom[]) ?? [];
 }
 
 export function getCommandSuggestionRange(
-  model: ModelPrivate,
+  model: _Model,
   options?: { before: Offset }
 ): Range | [undefined, undefined] {
   let start = 0;

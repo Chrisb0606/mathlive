@@ -1,29 +1,74 @@
-import { on, off, getAtomBounds, Rect } from './utils';
-import type { MathfieldPrivate } from './mathfield-private';
+import { getAtomBounds, Rect } from './utils';
+import type { _Mathfield } from './mathfield-private';
 import { requestUpdate } from './render';
-import { Offset } from '../public/mathfield';
 import { Atom } from '../core/atom-class';
 import { acceptCommandSuggestion } from './autocomplete';
 import { selectGroup } from '../editor-model/commands-select';
-import { isBrowser } from '../common/capabilities';
+import type { Offset } from 'public/mathfield';
 
 let gLastTap: { x: number; y: number; time: number } | null = null;
 let gTapCount = 0;
 
-function isTouchEvent(evt: Event): evt is TouchEvent {
-  return isBrowser() && 'TouchEvent' in globalThis && evt instanceof TouchEvent;
+export class PointerTracker {
+  private static controller: AbortController | undefined;
+  private static pointerId: number | undefined;
+  private static element: HTMLElement | undefined;
+
+  static start(
+    element: HTMLElement,
+    evt: Event,
+    onMove: (this: HTMLElement, ev: PointerEvent | MouseEvent) => any,
+    onCancel: (this: HTMLElement, ev: Event) => any
+  ): void {
+    PointerTracker.element = element;
+
+    // Have to create a new controller each time, as they can only be used once
+    PointerTracker.controller?.abort();
+    PointerTracker.controller = new AbortController();
+
+    const options = { signal: PointerTracker.controller.signal };
+
+    if ('PointerEvent' in window) {
+      element.addEventListener('pointermove', onMove, options);
+      element.addEventListener('pointerup', onCancel, options);
+      element.addEventListener('pointercancel', onCancel, options);
+      if (isPointerEvent(evt)) {
+        PointerTracker.pointerId = evt.pointerId;
+        element.setPointerCapture(evt.pointerId);
+      }
+    } else {
+      // @ts-ignore
+      window.addEventListener('mousemove', onMove, options);
+      // @ts-ignore
+      window.addEventListener('blur', onCancel, options);
+      // @ts-ignore
+      window.addEventListener('mouseup', onCancel, options);
+    }
+  }
+
+  static stop(): void {
+    PointerTracker.controller?.abort();
+    PointerTracker.controller = undefined;
+
+    if (typeof PointerTracker.pointerId === 'number') {
+      PointerTracker.element!.releasePointerCapture(PointerTracker.pointerId);
+      PointerTracker.pointerId = undefined;
+    }
+  }
 }
 
-function isPointerEvent(evt: Event): evt is PointerEvent {
+function isPointerEvent(evt: Event | null): evt is PointerEvent {
   return (
-    isBrowser() && 'PointerEvent' in globalThis && evt instanceof PointerEvent
+    evt !== null &&
+    globalThis.PointerEvent !== undefined &&
+    evt instanceof PointerEvent
   );
 }
 
-export function onPointerDown(
-  mathfield: MathfieldPrivate,
-  evt: PointerEvent | TouchEvent
-): void {
+export function onPointerDown(mathfield: _Mathfield, evt: PointerEvent): void {
+  // If a mouse button other than the main one was pressed, return.
+  if (evt.buttons > 1) return;
+
   //Reset the atom bounds cache
   mathfield.atomBoundsCache = new Map<string, Rect>();
 
@@ -33,42 +78,20 @@ export function onPointerDown(
   let trackingWords = false;
   let dirty: 'none' | 'selection' | 'all' = 'none';
 
-  // If a mouse button other than the main one was pressed, return.
-  // On iOS 12.4 Safari and Firefox on Android (which do not support
-  // PointerEvent) the touchstart event is sent with event.buttons = 0
-  // which for a mouse event would normally be an invalid button.
-  // Accept this button 0.
-  if (isPointerEvent(evt) && evt.buttons > 1) return;
-
   let scrollLeft = false;
   let scrollRight = false;
-  // Note: evt['touches'] is for touchstart (when PointerEvent is not supported)
-  const anchorX = isTouchEvent(evt) ? evt.touches[0].clientX : evt.clientX;
-  const anchorY = isTouchEvent(evt) ? evt.touches[0].clientY : evt.clientY;
+
+  const anchorX = evt.clientX;
+  const anchorY = evt.clientY;
   const anchorTime = Date.now();
   const field = that.field!;
   const scrollInterval = setInterval(() => {
     if (scrollLeft) field.scroll({ top: 0, left: field.scrollLeft - 16 });
     else if (scrollRight) field.scroll({ top: 0, left: field.scrollLeft + 16 });
   }, 32);
-  function endPointerTracking(evt: null | PointerEvent | TouchEvent): void {
-    if (!isBrowser()) return;
 
-    if ('PointerEvent' in window) {
-      off(field, 'pointermove', onPointerMove);
-      off(
-        field,
-        'pointerup pointercancel',
-        endPointerTracking as EventListener
-      );
-      if (evt instanceof PointerEvent)
-        field.releasePointerCapture(evt.pointerId);
-    } else {
-      off(field, 'touchmove', onPointerMove);
-      off(field, 'touchcancel touchend', endPointerTracking as EventListener);
-      off(window, 'mousemove', onPointerMove);
-      off(window, 'mouseup blur', endPointerTracking as EventListener);
-    }
+  function endPointerTracking(): void {
+    PointerTracker.stop();
 
     trackingPointer = false;
     clearInterval(scrollInterval);
@@ -76,19 +99,19 @@ export function onPointerDown(
     if (evt) evt.preventDefault();
   }
 
-  function onPointerMove(evt: PointerEvent | TouchEvent): void {
+  function onPointerMove(evt: PointerEvent | MouseEvent): void {
     // If we've somehow lost focus, end tracking
     if (!that.hasFocus()) {
-      endPointerTracking(null);
+      endPointerTracking();
       return;
     }
 
-    const x = isTouchEvent(evt) ? evt.touches[0].clientX : evt.clientX;
-    const y = isTouchEvent(evt) ? evt.touches[0].clientY : evt.clientY;
+    const x = evt.clientX;
+    const y = evt.clientY;
     // Ignore events that are within small spatial and temporal bounds
     // of the pointer down
     const hysteresis =
-      isTouchEvent(evt) || evt.pointerType === 'touch' ? 20 : 5;
+      isPointerEvent(evt) && evt.pointerType === 'touch' ? 20 : 5;
     if (
       Date.now() < anchorTime + 500 &&
       Math.abs(anchorX - x) < hysteresis &&
@@ -102,37 +125,27 @@ export function onPointerDown(
     const fieldBounds = field.getBoundingClientRect();
     scrollRight = x > fieldBounds.right;
     scrollLeft = x < fieldBounds.left;
-    let actualAnchor: Offset = anchor;
+    let actualAnchor = anchor;
     if (isPointerEvent(evt)) {
       if (!evt.isPrimary) {
         actualAnchor = offsetFromPoint(that, evt.clientX, evt.clientY, {
           bias: 0,
         });
       }
-    } else if (evt.touches && evt.touches.length === 2) {
-      actualAnchor = offsetFromPoint(
-        that,
-        evt.touches[1].clientX,
-        evt.touches[1].clientY,
-        { bias: 0 }
-      );
     }
 
     const focus = offsetFromPoint(that, x, y, {
       bias: x <= anchorX ? (x === anchorX ? 0 : -1) : +1,
     });
-    if (trackingWords) {
-      // @todo: extend focus, actualAnchor to word boundary
-    }
 
     if (actualAnchor >= 0 && focus >= 0) {
       that.model.extendSelectionTo(actualAnchor, focus);
       requestUpdate(mathfield);
     }
 
-    // Prevent synthetic mouseMove event when this is a touch event
-    evt.preventDefault();
-    evt.stopPropagation();
+    if (trackingWords) selectGroup(that.model);
+    // Note: do not prevent default, as we need to track
+    // the pointer to prevent long press if the pointer has moved
   }
 
   // Calculate the tap count
@@ -160,20 +173,19 @@ export function onPointerDown(
     anchorY >= bounds.top &&
     anchorY <= bounds.bottom
   ) {
-    // Focus the mathfield
-    if (!mathfield.hasFocus()) {
-      dirty = 'all';
-      mathfield.focus({ scrollIntoView: false });
-    }
-
-    // Clicking or tapping the field resets the keystroke buffer and
-    // smart mode
+    // Clicking or tapping the field resets the keystroke buffer
     mathfield.flushInlineShortcutBuffer();
-    mathfield.smartModeSuppressed = false;
 
     anchor = offsetFromPoint(mathfield, anchorX, anchorY, {
       bias: 0,
     });
+
+    // Reset the style bias if the anchor is different
+    if (anchor !== mathfield.model.anchor) {
+      mathfield.defaultStyle = {};
+      mathfield.styleBias = 'left';
+    }
+
     if (anchor >= 0) {
       // Set a `tracking` class to avoid triggering the hover of the virtual
       // keyboard toggle, for example
@@ -201,13 +213,11 @@ export function onPointerDown(
         else dirty = 'selection';
       }
 
-      // Reset any user-specified style
-      mathfield.style = {};
       // `evt.detail` contains the number of consecutive clicks
       // for double-click, triple-click, etc...
       // (note that `evt.detail` is not set when using pointerEvent)
       if (evt.detail === 3 || gTapCount > 2) {
-        endPointerTracking(evt);
+        endPointerTracking();
         if (evt.detail === 3 || gTapCount === 3) {
           // This is a triple-click
           mathfield.model.selection = {
@@ -217,33 +227,8 @@ export function onPointerDown(
         }
       } else if (!trackingPointer) {
         trackingPointer = true;
-        if (isBrowser() && 'PointerEvent' in window) {
-          on(field, 'pointermove', onPointerMove);
-          on(
-            field,
-            'pointerup pointercancel',
-            endPointerTracking as EventListener
-          );
-          if (evt instanceof PointerEvent)
-            field.setPointerCapture(evt.pointerId);
-        } else {
-          on(window, 'blur', endPointerTracking as EventListener);
-          if (isTouchEvent(evt) && evt.touches) {
-            // This is a touchstart event (and PointerEvent is not supported)
-            // To receive the subsequent touchmove/touch, need to
-            // listen to this evt.target.
-            // This was a touch event
-            on(evt.target!, 'touchmove', onPointerMove);
-            on(
-              evt.target!,
-              'touchcancel touchend',
-              endPointerTracking as EventListener
-            );
-          } else {
-            on(window, 'mousemove', onPointerMove);
-            on(window, 'mouseup', endPointerTracking as EventListener);
-          }
-        }
+
+        PointerTracker.start(field, evt, onPointerMove, endPointerTracking);
 
         if (evt.detail === 2 || gTapCount === 2) {
           // This is a double-click
@@ -253,15 +238,23 @@ export function onPointerDown(
         }
       }
     }
+    // Focus the mathfield
+    // (do it after the selection has been set, since the
+    // logic on what to do on focus may depend on the selection)
+    if (!mathfield.hasFocus()) {
+      dirty = 'none'; // focus() will refresh
+      mathfield.focus({ preventScroll: true });
+    }
   } else gLastTap = null;
+
+  mathfield.stopCoalescingUndo();
 
   if (dirty !== 'none') {
     if (mathfield.model.selectionIsCollapsed) dirty = 'all';
     requestUpdate(mathfield);
   }
 
-  // Prevent the browser from handling. In particular when this is a
-  // touch event, prevent the synthetic mouseDown event from being generated
+  // Prevent the browser from handling.
   evt.preventDefault();
 }
 
@@ -273,7 +266,7 @@ function distance(x: number, y: number, r: Rect): number {
 }
 
 function nearestAtomFromPointRecursive(
-  mathfield: MathfieldPrivate,
+  mathfield: _Mathfield,
   cache: Map<string, [distance: number, atom: Atom | null]>,
   atom: Atom,
   x: number,
@@ -315,7 +308,7 @@ function nearestAtomFromPointRecursive(
 }
 
 export function nearestAtomFromPoint(
-  mathfield: MathfieldPrivate,
+  mathfield: _Mathfield,
   x: number,
   y: number
 ): Atom {
@@ -331,11 +324,11 @@ export function nearestAtomFromPoint(
 
 /**
  * @param options.bias  if 0, the midpoint of the bounding box
- * is considered to return the sibling. If <0, the left sibling is
+ * is considered to return the sibling. If &lt;0, the left sibling is
  * favored, if >0, the right sibling
  */
 export function offsetFromPoint(
-  mathfield: MathfieldPrivate,
+  mathfield: _Mathfield,
   x: number,
   y: number,
   options?: { bias?: -1 | 0 | 1 }
@@ -343,7 +336,10 @@ export function offsetFromPoint(
   //
   // 1/ Check if we're inside the mathfield bounding box
   //
-  const bounds = mathfield.fieldContent!.getBoundingClientRect();
+  const bounds = mathfield.field
+    .querySelector('.ML__latex')!
+    .getBoundingClientRect();
+  if (!bounds) return 0;
   if (x > bounds.right || y > bounds.bottom + 8)
     return mathfield.model.lastOffset;
 

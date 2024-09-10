@@ -1,7 +1,6 @@
 import { globalMathLive } from '../mathlive';
-import { isBrowser } from '../common/capabilities';
+import { isBrowser } from '../ui/utils/capabilities';
 import { render } from '../editor-mathfield/render';
-import { MathfieldOptions } from '../public/options';
 
 function removeHighlight(element: Element | null): void {
   if (!element) return;
@@ -45,24 +44,21 @@ function highlightAtomID(element: HTMLElement | null, atomID?: string): void {
  * @param element - The DOM element to highlight
  * @param text - The text to speak
  */
-export function defaultReadAloudHook(
-  element: HTMLElement,
-  text: string,
-  config: Partial<MathfieldOptions>
-): void {
+export function defaultReadAloudHook(element: HTMLElement, text: string): void {
   if (!isBrowser()) return;
 
-  config ??= globalMathLive().config;
-
-  if (config.speechEngine !== 'amazon') {
-    console.warn('Use Amazon TTS Engine for synchronized highlighting');
-    if (config.speakHook) config.speakHook(text, config);
+  if (globalThis.MathfieldElement.speechEngine !== 'amazon') {
+    console.error(
+      `MathLive {{SDK_VERSION}}: Use Amazon TTS Engine for synchronized highlighting`
+    );
+    if (typeof globalThis.MathfieldElement.speakHook === 'function')
+      globalThis.MathfieldElement.speakHook(text);
     return;
   }
 
   if (!globalThis.AWS) {
-    console.warn(
-      'AWS SDK not loaded. See https://www.npmjs.com/package/aws-sdk'
+    console.error(
+      `MathLive {{SDK_VERSION}}: AWS SDK not loaded. See https://www.npmjs.com/package/aws-sdk`
     );
     return;
   }
@@ -71,7 +67,7 @@ export function defaultReadAloudHook(
 
   const parameters = {
     OutputFormat: 'json',
-    VoiceId: config.speechEngineVoice ?? 'Joanna',
+    VoiceId: globalThis.MathfieldElement.speechEngineVoice ?? 'Joanna',
     Engine: 'standard', // The neural engine does not appear to support ssml marks
     Text: text,
     TextType: 'ssml',
@@ -83,7 +79,9 @@ export function defaultReadAloudHook(
   // Request the mark points
   polly.synthesizeSpeech(parameters, (err, data) => {
     if (err) {
-      console.warn('polly.synthesizeSpeech() error:', err, err.stack);
+      console.trace(
+        `MathLive {{SDK_VERSION}}: \`polly.synthesizeSpeech()\` error: ${err}`
+      );
       return;
     }
 
@@ -109,12 +107,8 @@ export function defaultReadAloudHook(
     parameters.SpeechMarkTypes = [];
     polly.synthesizeSpeech(parameters, (err, data) => {
       if (err) {
-        console.warn(
-          'polly.synthesizeSpeech(',
-          text,
-          ') error:',
-          err,
-          err.stack
+        console.trace(
+          `MathLive {{SDK_VERSION}}: \`polly.synthesizeSpeech("${text}") error:${err}`
         );
         return;
       }
@@ -130,7 +124,7 @@ export function defaultReadAloudHook(
       if (!global.readAloudAudio) {
         global.readAloudAudio = new Audio();
         global.readAloudAudio.addEventListener('ended', () => {
-          const mathfield = global.readAloudMathField;
+          const mathfield = global.readAloudMathfield;
 
           global.readAloudStatus = 'ended';
           document.body.dispatchEvent(
@@ -143,7 +137,7 @@ export function defaultReadAloudHook(
           if (mathfield) {
             render(mathfield);
             global.readAloudElement = null;
-            global.readAloudMathField = null;
+            global.readAloudMathfield = null;
             global.readAloudTokens = [];
             global.readAloudMarks = [];
             global.readAloudCurrentMark = '';

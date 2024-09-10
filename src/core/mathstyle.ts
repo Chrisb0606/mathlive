@@ -26,9 +26,9 @@
  * > We shall use C to stand for the current style, and we shall say that the
  * > math list is being typeset in style C. (b) The typesetting is done either
  * > with or without penalties. Formulas in the text of a paragraph are converted
- * > to horizontal lists in which additional penalty items are inserted after
+ * > to horizontal lists in which additional penalty items are ed after
  * > binary operations and relations, in order to aid in line breaking. Such
- * > penalties are not inserted in other cases, because they would serve no
+ * > penalties are not ed in other cases, because they would serve no
  * > useful function.
  * >
  * > The eight styles are considered to be D > D′ > T > T′ > S > S′ > SS > SS′,
@@ -41,8 +41,9 @@
  * > Finally, style C↓ is the subscript style, which is (C↑) .
  */
 
-import { FontSize } from '../public/core';
-import { FONT_METRICS, FontMetrics } from './font-metrics';
+import { FONT_METRICS } from './font-metrics';
+import type { FontSize } from '../public/core-types';
+import { FontMetrics } from './types';
 
 // IDs of the different MATHSTYLES
 export const D = 7; // Displaystyle
@@ -136,13 +137,7 @@ export class Mathstyle {
   }
 }
 
-export const MATHSTYLES: {
-  [key: number]: Mathstyle;
-  displaystyle?: Mathstyle;
-  textstyle?: Mathstyle;
-  scriptstyle?: Mathstyle;
-  scriptscriptstyle?: Mathstyle;
-} = {
+const NUMERIC_MATHSTYLES = {
   7: new Mathstyle(D, 0, false),
   6: new Mathstyle(Dc, 0, true),
   5: new Mathstyle(T, 0, false),
@@ -152,15 +147,16 @@ export const MATHSTYLES: {
   1: new Mathstyle(SS, -4, false),
   0: new Mathstyle(SSc, -4, true),
 };
-
-// Aliases
-MATHSTYLES.displaystyle = MATHSTYLES[D];
-MATHSTYLES.textstyle = MATHSTYLES[T];
-MATHSTYLES.scriptstyle = MATHSTYLES[S];
-MATHSTYLES.scriptscriptstyle = MATHSTYLES[SS];
-
-export type MathstyleName =
-  | 'displaystyle'
-  | 'textstyle'
-  | 'scriptstyle'
-  | 'scriptscriptstyle';
+export const MATHSTYLES: {
+  [key: number]: Mathstyle;
+  displaystyle: Mathstyle;
+  textstyle: Mathstyle;
+  scriptstyle: Mathstyle;
+  scriptscriptstyle: Mathstyle;
+} = {
+  ...NUMERIC_MATHSTYLES,
+  displaystyle: NUMERIC_MATHSTYLES[D],
+  textstyle: NUMERIC_MATHSTYLES[T],
+  scriptstyle: NUMERIC_MATHSTYLES[S],
+  scriptscriptstyle: NUMERIC_MATHSTYLES[SS],
+};

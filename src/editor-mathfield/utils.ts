@@ -1,8 +1,7 @@
-import { throwIfNotInBrowser } from '../common/capabilities';
 import { Atom } from '../core/atom-class';
-import type { Range } from '../public/mathfield';
+import type { ElementInfo, Offset, Range } from '../public/mathfield';
 import { OriginValidator } from '../public/options';
-import { MathfieldPrivate } from './mathfield-private';
+import { _Mathfield } from './mathfield-private';
 
 export type Rect = {
   top: number;
@@ -11,73 +10,6 @@ export type Rect = {
   right: number;
 };
 
-export function on(
-  element: EventTarget,
-  inSelectors: string,
-  listener: EventListenerOrEventListenerObject,
-  options?: AddEventListenerOptions
-): void {
-  const selectors = inSelectors.split(' ');
-  for (const sel of selectors) {
-    const m = sel.match(/(.*):(.*)/);
-    if (m) {
-      const options2 = options ?? {};
-      if (m[2] === 'active') options2.passive = false;
-      else options2[m[2]] = true;
-
-      element.addEventListener(m[1], listener, options2);
-    } else element.addEventListener(sel, listener, options);
-  }
-}
-
-export function off(
-  element: EventTarget,
-  inSelectors: string,
-  listener: EventListenerOrEventListenerObject,
-  options?: AddEventListenerOptions
-): void {
-  const selectors = inSelectors.split(' ');
-  for (const sel of selectors) {
-    const m = sel.match(/(.*):(.*)/);
-    if (m) {
-      const options2 = options ?? {};
-      if (m[2] === 'active') options2.passive = false;
-      else options2[m[2]] = true;
-
-      element.removeEventListener(m[1], listener, options2);
-    } else element.removeEventListener(sel, listener, options);
-  }
-}
-
-export function getSharedElement(id: string): HTMLElement {
-  throwIfNotInBrowser();
-
-  let result = document.getElementById(id);
-  if (result) {
-    result.dataset.refcount = Number(
-      Number.parseInt(result.getAttribute('data-refcount') ?? '0') + 1
-    ).toString();
-  } else {
-    result = document.createElement('div');
-    result.setAttribute('aria-hidden', 'true');
-    result.dataset.refcount = '1';
-    result.id = id;
-    document.body.append(result);
-  }
-
-  return result;
-}
-
-// @revisit: check the elements are correctly released
-export function releaseSharedElement(element?: HTMLElement): void {
-  if (!element) return;
-  const refcount = Number.parseInt(
-    element.getAttribute('data-refcount') ?? '0'
-  );
-  if (refcount <= 1) element.remove();
-  else element.dataset.refcount = Number(refcount - 1).toString();
-}
-
 /**
  * Checks if the argument is a valid Mathfield.
  * After a Mathfield has been destroyed (for example by calling `dispose()`
@@ -85,7 +17,7 @@ export function releaseSharedElement(element?: HTMLElement): void {
  * operations invoked via requestAnimationFrame() for example, that would
  * need to ensure the mathfield is still valid by the time they're executed.
  */
-export function isValidMathfield(mf: MathfieldPrivate): boolean {
+export function isValidMathfield(mf: _Mathfield): boolean {
   return mf.element?.mathfield === mf;
 }
 
@@ -101,7 +33,7 @@ function findElementWithCaret(element: Element): Element | null {
 }
 
 /**
- * Return the (x,y) client coordinates of the caret
+ * Return the (x,y) client coordinates of the caret in viewport coordinates
  */
 export function getCaretPoint(
   element: Element
@@ -120,30 +52,27 @@ function branchId(atom: Atom): string {
   if (!atom.parent) return 'root';
   let result = atom.parent.id ?? '';
   result +=
-    typeof atom.treeBranch === 'string'
-      ? '-' + atom.treeBranch
-      : `-${atom.treeBranch![0]}/${atom.treeBranch![0]}`;
+    typeof atom.parentBranch === 'string'
+      ? '-' + atom.parentBranch
+      : `-${atom.parentBranch![0]}/${atom.parentBranch![0]}`;
   return result;
 }
 
 export function adjustForScrolling(
-  mathfield: MathfieldPrivate,
-  rect: Rect | null
+  mathfield: _Mathfield,
+  rect: Rect | null,
+  scaleFactor: number
 ): Rect | null {
   if (!rect) return null;
   const fieldRect = mathfield.field!.getBoundingClientRect();
   const w = rect.right - rect.left;
   const h = rect.bottom - rect.top;
   const left = Math.ceil(
-    rect.left - fieldRect.left + mathfield.field!.scrollLeft
+    rect.left - fieldRect.left + mathfield.field.scrollLeft * scaleFactor
   );
+
   const top = Math.ceil(rect.top - fieldRect.top);
-  return {
-    left,
-    right: left + w,
-    top,
-    bottom: top + h,
-  };
+  return { left, right: left + w, top, bottom: top + h };
 }
 
 function getNodeBounds(node: Element): Rect {
@@ -162,7 +91,7 @@ function getNodeBounds(node: Element): Rect {
     if (
       child.nodeType === 1 &&
       'atomId' in (child as HTMLElement).dataset &&
-      !child.classList.contains('pstrut')
+      !child.classList.contains('ML__pstrut')
     ) {
       const r: Rect = getNodeBounds(child);
       result.left = Math.min(result.left, r.left);
@@ -175,14 +104,11 @@ function getNodeBounds(node: Element): Rect {
   return result;
 }
 
-export function getAtomBounds(
-  mathfield: MathfieldPrivate,
-  atom: Atom
-): Rect | null {
+export function getAtomBounds(mathfield: _Mathfield, atom: Atom): Rect | null {
   if (!atom.id) return null;
   let result: Rect | null = mathfield.atomBoundsCache?.get(atom.id) ?? null;
   if (result !== null) return result;
-  const node = mathfield.field!.querySelector(`[data-atom-id="${atom.id}"]`);
+  const node = mathfield.field.querySelector(`[data-atom-id="${atom.id}"]`);
   result = node ? getNodeBounds(node) : null;
   if (mathfield.atomBoundsCache) {
     if (result) mathfield.atomBoundsCache.set(atom.id, result);
@@ -196,7 +122,7 @@ export function getAtomBounds(
  * one rect per branch.
  */
 function getRangeBounds(
-  mathfield: MathfieldPrivate,
+  mathfield: _Mathfield,
   range: Range,
   options?: { excludeAtomsWithBackground?: boolean }
 ): Rect[] {
@@ -207,11 +133,27 @@ function getRangeBounds(
     includeChildren: true,
   })) {
     if (options?.excludeAtomsWithBackground && atom.style.backgroundColor)
-      break;
+      continue;
+
+    // Logic to accommodate mathfield hosted in an isotropically
+    // scale-transformed element.
+    // Without this, the selection indicator will not be in the right place.
+
+    // 1. Inquire how big the mathfield thinks it is
+    const field = mathfield.field;
+    const offsetWidth = field.offsetWidth;
+
+    // 2. Get the actual screen width of the box
+    const actualWidth = Math.floor(field.getBoundingClientRect().width);
+
+    // 3. Divide the two to get the scale factor
+    let scaleFactor = actualWidth / offsetWidth;
+    scaleFactor = isNaN(scaleFactor) ? 1 : scaleFactor;
 
     const bounds = adjustForScrolling(
       mathfield,
-      getAtomBounds(mathfield, atom)
+      getAtomBounds(mathfield, atom),
+      scaleFactor
     );
     if (bounds) {
       const id = branchId(atom);
@@ -231,7 +173,7 @@ function getRangeBounds(
 }
 
 export function getSelectionBounds(
-  mathfield: MathfieldPrivate,
+  mathfield: _Mathfield,
   options?: { excludeAtomsWithBackground?: boolean }
 ): Rect[] {
   return mathfield.model.selection.ranges.reduce(
@@ -244,12 +186,10 @@ export function validateOrigin(
   origin: string,
   originValidator: OriginValidator
 ): boolean {
-  if (origin === '*') return true;
-
-  if (originValidator === 'none') return true;
+  if (origin === '*' || originValidator === 'none') return true;
 
   if (originValidator === 'same-origin')
-    return !globalThis.origin || origin === globalThis.origin;
+    return !window.origin || origin === window.origin;
 
   if (typeof originValidator === 'function') return originValidator(origin);
 
@@ -272,4 +212,78 @@ export function getLocalDOMRect(el: HTMLElement): DOMRect {
   }
 
   return new DOMRect(offsetLeft, offsetTop, width, height);
+}
+
+export function getElementInfo(
+  mf: _Mathfield | undefined | null,
+  offset: Offset
+): ElementInfo | undefined {
+  if (!mf) return undefined;
+
+  const atom = mf.model.at(offset);
+  if (!atom) return undefined;
+
+  let result: ElementInfo = {};
+
+  const bounds = getAtomBounds(mf, atom);
+  if (bounds)
+    result.bounds = new DOMRect(
+      bounds.left,
+      bounds.top,
+      bounds.right - bounds.left,
+      bounds.bottom - bounds.top
+    );
+
+  result.depth = atom.treeDepth - 2;
+
+  result.style = atom.style;
+
+  // Look for some 'htmlData' in the atom or its ancestors
+  let a: undefined | Atom = atom;
+  while (a) {
+    if (a.command === '\\htmlData' && a.args && typeof a.args[0] === 'string') {
+      const entries = a.args[0].split(',');
+      for (const entry of entries) {
+        const matched = entry.match(/([^=]+)=(.+$)/);
+        if (matched) {
+          const key = matched[1].trim().replace(/ /g, '-');
+          if (key) {
+            if (!result.data) result.data = {};
+            result.data[key] = matched[2];
+          }
+        } else {
+          const key = entry.trim().replace(/ /g, '-');
+          if (key) {
+            if (!result.data) result.data = {};
+            result.data[key] = undefined;
+          }
+        }
+      }
+    }
+
+    if (a.command === '\\htmlId' || a.command === '\\cssId') {
+      if (!result.id && a.args && typeof a.args[0] === 'string') {
+        result.id = a.args[0];
+      }
+    }
+    a = a.parent;
+  }
+
+  if (atom.mode === 'math' || atom.mode === 'text')
+    result.latex = Atom.serialize([atom], { defaultMode: 'math' });
+
+  return result;
+}
+
+export function getHref(mf: _Mathfield, offset: Offset): string {
+  let a: Atom | undefined = mf.model.at(offset);
+  while (a) {
+    if (a.command === '\\href') {
+      const url = a.args[0];
+      if (typeof url === 'string') return url;
+    }
+
+    a = a.parent;
+  }
+  return '';
 }

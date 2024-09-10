@@ -1,10 +1,19 @@
 /**
- * This module contains metrics regarding fonts and individual symbols. The sigma
- * and xi variables, as well as the CHARACTER_METRICS_MAP map contain data extracted from
- * TeX, TeX font metrics, and the TTF files. These data are then exposed via the
- * `metrics` variable and the getCharacterMetrics function.
+ * This module contains metrics regarding fonts and individual symbols.
+ *
+ * The sigma and xi variables, as well as the CHARACTER_METRICS_MAP map contain
+ * data extracted from TeX, TeX font metrics, and the TTF files. These data
+ * are then exposed via the `metrics` variable and the getCharacterMetrics
+ * function.
+ *
+ * Resources:
+ * - http://www.ntg.nl/maps/38/03.pdf for an explanation of the sigma/chi
+ *   metrics and how they relate to the OpenFont math metrics
+ * - https://typedrawers.com/discussion/4767/design-differences-between-text-font-and-math-font
+ *
  */
 import CHARACTER_METRICS_MAP from './font-metrics-data';
+import type { FontMetrics, FontName } from './types';
 
 // This CHARACTER_METRICS_MAP contains a mapping from font name and character
 // code to character metrics, including height, depth, italic correction, and
@@ -17,48 +26,7 @@ interface CharacterMetrics {
   height: number;
   italic: number;
   skew: number;
-}
-
-// See http://www.ntg.nl/maps/38/03.pdf for an explanation of the metrics
-// and how they relate to the OpenFont math metrics
-export interface FontMetrics<T = number> {
-  slant: T;
-  space: T;
-  stretch: T;
-  shrink: T;
-  xHeight: T; // sigma 5 = accent base height
-  quad: T;
-  extraSpace: T;
-  num1: T; // sigma 8 = FractionNumeratorDisplayStyleShiftUp
-  num2: T; // sigma 9 = FractionNumeratorShiftUp
-  num3: T; // sigma 10 = StackTopShiftUp
-  denom1: T; // sigma 11 = StackBottomDisplayStyleShiftDown = FractionDenominatorDisplayStyleShiftDown
-  denom2: T; // sigma 12 = StackBottomShiftDown = FractionDenominatorShiftDown
-  sup1: T; //sigma 13 = SuperscriptShiftUp
-  sup2: T;
-  sup3: T; // sigma 15 = SuperscriptShiftUpCramped
-  sub1: T; // sigma 16 = SubscriptShiftDown
-  sub2: T;
-  supDrop: T; // sigma 18 = SuperscriptBaselineDropMax
-  subDrop: T; // sigma 19 = SubscriptBaselineDropMin
-  delim1: T;
-  delim2: T; // sigma 21 = DelimitedSubFormulaMinHeight
-  axisHeight: T; // sigma 22
-
-  // Note: xi14: offset from baseline for superscript TexBook p. 179
-  // Note: xi16: offset from baseline for subscript
-
-  // The \sqrt rule width is taken from the height of the surd character.
-  // Since we use the same font at all sizes, this thickness doesn't scale.
-
-  defaultRuleThickness: T; // xi8; cmex7: 0.049
-  bigOpSpacing1: T; // xi9
-  bigOpSpacing2: T; // xi10
-  bigOpSpacing3: T; // xi11
-  bigOpSpacing4: T; // xi12; cmex7: 0.611
-  bigOpSpacing5: T; // xi13; cmex7: 0.143
-
-  sqrtRuleThickness: T;
+  width: number;
 }
 
 // This regex combines
@@ -127,8 +95,10 @@ export const FONT_METRICS: FontMetrics<
   xHeight: [X_HEIGHT, X_HEIGHT, X_HEIGHT],
   quad: [1.0, 1.171, 1.472],
   extraSpace: [0.0, 0.0, 0.0],
-  num1: [0.677, 0.732, 0.925],
-  num2: [0.394, 0.384, 0.387],
+  num1: [0.5, 0.732, 0.925], // Was   num1: [0.677, 0.732, 0.925],
+
+  num2: [0.394, 0.384, 0.5], // Was   num2: [0.394, 0.384, 0.387],
+
   num3: [0.444, 0.471, 0.504],
   denom1: [0.686, 0.752, 1.025],
   denom2: [0.345, 0.344, 0.532],
@@ -177,7 +147,7 @@ export const DEFAULT_FONT_SIZE = 5;
 // descenders we prefer approximations with ascenders, primarily to prevent
 // the fraction bar or root line from intersecting the glyph.
 // TODO(kevinb) allow union of multiple glyph metrics for better accuracy.
-const extraCharacterMap = {
+const EXTRA_CHARACTER_MAP = {
   '\u00A0': '\u0020', // NON-BREAKING SPACE is like space
   '\u200B': '\u0020', // ZERO WIDTH SPACE is like space
   // Latin-1
@@ -257,6 +227,82 @@ const extraCharacterMap = {
   'я': 'r',
 };
 
+// const CSS_FONT = {
+//   'Main-Regular': '1000px KaTeX_Main',
+//   'Main-Italic': 'italic 1000px KaTeX_Main',
+//   'Main-Bold': 'bold 1000px KaTeX_Main',
+//   'Main-BoldItalic': 'italic bold 1000px KaTeX_Main',
+//   'Typewriter-Regular': '1000px KaTeX_Typewriter',
+//   'Math-Italic': 'italic 1000px  "KaTeX_Math", Helvetica',
+//   'Math-BoldItalic': 'bold italic 1000px "KaTeX_Math", Helvetica',
+//   'AMS-Regular': '1000px KaTeX_AMS',
+//   'SansSerif-Regular': '1000px KaTeX_SansSerif',
+//   'Caligraphic-Regular': '1000px KaTeX_Caligraphic',
+//   'Script-Regular': '1000px KaTeX_Script',
+//   'Fraktur-Regular': '1000px KaTeX_Fraktur',
+//   'Size1-Regular': '1000px KaTeX_Size1',
+//   'Size2-Regular': '1000px KaTeX_Size2',
+//   'Size3-Regular': '1000px KaTeX_Size3',
+//   'Size4-Regular': '1000px KaTeX_Size4',
+// };
+
+// let ALT_FONT_METRICS: any;
+
+// function rebuildMetrics(): void {
+//   const canvas = new OffscreenCanvas(0, 0);
+//   const ctx = canvas.getContext('2d');
+//   if (ctx) {
+//     const fontSize = 1000;
+//     ALT_FONT_METRICS = {};
+
+//     for (const fontName of Object.keys(CSS_FONT)) {
+//       ALT_FONT_METRICS[fontName] = {};
+//       ctx.font = CSS_FONT[fontName];
+//       for (const codepoint of Object.keys(CHARACTER_METRICS_MAP[fontName])) {
+//         const c = String.fromCodePoint(parseInt(codepoint));
+//         const metrics = CHARACTER_METRICS_MAP[fontName][codepoint];
+
+//         const m = ctx.measureText(c);
+
+//         const width = m.width / fontSize;
+//         const fullWidth =
+//           (m.actualBoundingBoxLeft + m.actualBoundingBoxRight) / fontSize;
+//         const italic = fullWidth - width;
+//         const height = m.actualBoundingBoxAscent / fontSize;
+//         const depth = m.actualBoundingBoxDescent / fontSize;
+
+//         ALT_FONT_METRICS[fontName][codepoint] = [depth, height, width, italic];
+
+//         // if (metrics[3]) console.log('skew ', codepoint, metrics[3]);
+//         // if (metrics[2]) console.log('italic ', codepoint, metrics[2]);
+//         if (
+//           metrics[2] !== 0
+//           // Math.round(10000 * (metrics[0] - depth)) > 100 ||
+//           // Math.round(10000 * (metrics[1] - height)) > 100 ||
+//           // Math.round(10000 * (metrics[4] - width)) > 100
+//           // Math.round(10000 * (metrics[2] - italic)) > 0.1
+//         ) {
+//           // ctx.fillText(c, 10, 50);
+//           console.log(
+//             fontName,
+//             c,
+//             ' -> ',
+//             metrics[0],
+//             metrics[1],
+//             metrics[2],
+//             metrics[4],
+//             '/',
+//             depth,
+//             height,
+//             italic,
+//             width
+//           );
+//         }
+//       }
+//     }
+//   }
+// }
+
 /**
  * This function is a convenience function for looking up information in the
  * CHARACTER_METRICS_MAP table. It takes a codepoint, and a font name.
@@ -265,8 +311,11 @@ const extraCharacterMap = {
  */
 export function getCharacterMetrics(
   codepoint: number | undefined,
-  fontName: string
+  fontName: FontName
 ): CharacterMetrics {
+  // if ('document' in globalThis && gFontsState === 'ready' && !ALT_FONT_METRICS)
+  //   rebuildMetrics();
+
   if (codepoint === undefined) codepoint = 77; // 'M'
   const metrics = CHARACTER_METRICS_MAP[fontName][codepoint];
 
@@ -277,6 +326,7 @@ export function getCharacterMetrics(
       height: metrics[1],
       italic: metrics[2],
       skew: metrics[3],
+      width: metrics[4],
     };
   }
 
@@ -288,13 +338,14 @@ export function getCharacterMetrics(
       height: 0.8,
       italic: 0,
       skew: 0,
+      width: 0.8,
     };
   }
 
   const char = String.fromCodePoint(codepoint);
 
-  if (char in extraCharacterMap)
-    codepoint = extraCharacterMap[char].codePointAt(0);
+  if (char in EXTRA_CHARACTER_MAP)
+    codepoint = EXTRA_CHARACTER_MAP[char].codePointAt(0);
   else if (CJK_REGEX.test(char)) {
     codepoint = 77; // 'M'.codepointAt(0);
     return {
@@ -303,6 +354,7 @@ export function getCharacterMetrics(
       height: 0.9,
       italic: 0,
       skew: 0,
+      width: 1.0,
     };
   }
 
@@ -312,5 +364,48 @@ export function getCharacterMetrics(
     height: 0.7,
     italic: 0,
     skew: 0,
+    width: 0.8,
   };
 }
+
+//
+// Regenerate the compact version of the font metrics table
+//
+
+// export function compact(m: object): void {
+//   const once = new Set();
+//   const map = new Map();
+//   let i = 1;
+//   for (const font of Object.keys(m)) {
+//     for (const c of Object.keys(m[font])) {
+//       const v = JSON.stringify(m[font][c]);
+//       if (!once.has(v)) once.add(v);
+//       else if (!map.has(v)) map.set(v, i++);
+//     }
+//   }
+
+//   // Output
+//   let result = '';
+//   for (const s of map.keys()) result += `const M${map.get(s)} = ${s};\n`;
+
+//   result += '\nexport default {\n';
+//   for (const font of Object.keys(m)) {
+//     result += `'${font}': {\n`;
+//     for (const c of Object.keys(m[font])) {
+//       const v = JSON.stringify(m[font][c]);
+//       const codepoint = Number.parseInt(c);
+//       const comment = `// U+${codepoint
+//         .toString(16)
+//         .padStart(4, '0')} ${String.fromCodePoint(codepoint)}\n`;
+//       if (map.has(v)) result += `${c}: M${map.get(v)}, ${comment}`;
+//       else result += `${c}: ${v}, ${comment}`;
+//     }
+
+//     result += '},\n';
+//   }
+
+//   result += '}\n';
+//   console.log(result);
+// }
+
+// compact(CHARACTER_METRICS_MAP);

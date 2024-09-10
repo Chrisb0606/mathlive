@@ -1,17 +1,23 @@
 /* eslint-disable no-new */
-import { mathVariantToUnicode } from '../core-definitions/definitions-utils';
-import { Atom, ToLatexOptions } from './atom';
-import { joinLatex } from './tokenizer';
-import { getPropertyRuns, Mode } from './modes-utils';
-import { Style } from '../public/core';
-import { Box } from './box';
-import { BoxAtom } from '../core-atoms/box';
-import { GlobalContext } from './context';
+import { Atom } from './atom';
+import { joinLatex, latexCommand } from './tokenizer';
+import {
+  getPropertyRuns,
+  Mode,
+  variantString,
+  weightString,
+} from './modes-utils';
+import type { Box } from './box';
+import type { Style, Variant, VariantStyle } from '../public/core-types';
+import { mathVariantToUnicode } from './unicode';
+import type { TokenDefinition } from 'latex-commands/types';
+import type { FontName, ToLatexOptions } from './types';
+import { addItalic } from '../editor-model/styling';
 
 // Each entry indicate the font-name (to be used to calculate font metrics)
 // and the CSS classes (for proper markup styling) for each possible
 // variant combinations.
-const VARIANTS: Record<string, [fontName: string, cssClass: string]> = {
+const VARIANTS: Record<string, [fontName: FontName, cssClass: string]> = {
   // Handle some special characters which are only available in "main" font (not "math")
   'main': ['Main-Regular', 'ML__cmr'],
   'main-italic': ['Main-Italic', 'ML__cmr ML__it'],
@@ -25,14 +31,14 @@ const VARIANTS: Record<string, [fontName: string, cssClass: string]> = {
 
   // Extended math symbols, arrows, etc.. at their standard Unicode codepoints
   'ams': ['AMS-Regular', 'ML__ams'],
-  'ams-bold': ['AMS-Regular', 'ML__ams'],
-  'ams-italic': ['AMS-Regular', 'ML__ams'],
-  'ams-bolditalic': ['AMS-Regular', 'ML__ams'],
+  'ams-bold': ['AMS-Regular', 'ML__ams ML__bold'],
+  'ams-italic': ['AMS-Regular', 'ML__ams ML__it'],
+  'ams-bolditalic': ['AMS-Regular', 'ML__ams ML__bold ML__it'],
 
   'sans-serif': ['SansSerif-Regular', 'ML__sans'],
   'sans-serif-bold': ['SansSerif-Regular', 'ML__sans ML__bold'],
-  'sans-serif-italic': ['SansSerif-Regular', 'ML__sans'],
-  'sans-serif-bolditalic': ['SansSerif-Regular', 'ML__sans'],
+  'sans-serif-italic': ['SansSerif-Regular', 'ML__sans ML__it'],
+  'sans-serif-bolditalic': ['SansSerif-Regular', 'ML__sans ML__bold ML__it'],
 
   'calligraphic': ['Caligraphic-Regular', 'ML__cal'],
   'calligraphic-bold': ['Caligraphic-Regular', 'ML__cal ML__bold'],
@@ -45,9 +51,9 @@ const VARIANTS: Record<string, [fontName: string, cssClass: string]> = {
   'script-bolditalic': ['Script-Regular', 'ML__script ML__bold ML__it'],
 
   'fraktur': ['Fraktur-Regular', 'ML__frak'],
-  'fraktur-bold': ['Fraktur-Regular', 'ML__frak'],
-  'fraktur-italic': ['Fraktur-Regular', 'ML__frak'],
-  'fraktur-bolditalic': ['Fraktur-Regular', 'ML__frak'],
+  'fraktur-bold': ['Fraktur-Regular', 'ML__frak ML__bold'],
+  'fraktur-italic': ['Fraktur-Regular', 'ML__frak ML__it'],
+  'fraktur-bolditalic': ['Fraktur-Regular', 'ML__frak ML__bold ML__it'],
 
   'monospace': ['Typewriter-Regular', 'ML__tt'],
   'monospace-bold': ['Typewriter-Regular', 'ML__tt ML__bold'],
@@ -56,12 +62,12 @@ const VARIANTS: Record<string, [fontName: string, cssClass: string]> = {
 
   // Blackboard characters are 'A-Z' in the AMS font
   'double-struck': ['AMS-Regular', 'ML__bb'],
-  'double-struck-bold': ['AMS-Regular', 'ML__bb'],
-  'double-struck-italic': ['AMS-Regular', 'ML__bb'],
-  'double-struck-bolditalic': ['AMS-Regular', 'ML__bb'],
+  'double-struck-bold': ['AMS-Regular', 'ML__bb ML__bold'],
+  'double-struck-italic': ['AMS-Regular', 'ML__bb ML_italic'],
+  'double-struck-bolditalic': ['AMS-Regular', 'ML__bb ML_bolditalic'],
 };
 
-const VARIANT_REPERTOIRE = {
+export const VARIANT_REPERTOIRE = {
   'double-struck': /^[A-Z ]$/,
   'script': /^[A-Z ]$/,
   'calligraphic': /^[\dA-Z ]$/,
@@ -99,84 +105,78 @@ export class MathMode extends Mode {
     super('math');
   }
 
-  createAtom(command: string, context: GlobalContext, style?: Style): Atom {
-    const info = context.getDefinition(command, 'math');
+  createAtom(command: string, info: TokenDefinition, style?: Style): Atom {
     if (info === null) {
-      return new Atom('mord', context, {
+      return new Atom({
+        type: 'mord',
         mode: 'math',
         command,
         value: command,
         style,
       });
     }
+
+    let isFunction: boolean;
+    try {
+      isFunction =
+        globalThis.MathfieldElement?.isFunction(info.command ?? command) ??
+        false;
+    } catch (e) {
+      isFunction = false;
+    }
+
     if (info.definitionType === 'symbol') {
-      const result = new Atom(info.type ?? 'mord', context, {
+      const result = new Atom({
+        type: info.type ?? 'mord',
         mode: 'math',
         command: info.command ?? command,
         value: String.fromCodePoint(info.codepoint),
+        isFunction,
         style,
       });
-      if (info.isFunction ?? false) result.isFunction = true;
 
       if (command.startsWith('\\')) result.verbatimLatex = command;
       return result;
     }
-    const result = new Atom('mord', context, {
+    const result = new Atom({
+      type: 'mord',
       mode: 'math',
       command: info.command ?? command,
       value: command,
+      isFunction,
       style,
     });
-    if (info.isFunction ?? false) result.isFunction = true;
-
     if (command.startsWith('\\')) result.verbatimLatex = command;
 
     return result;
   }
 
-  serialize(run: Atom[], options: ToLatexOptions): string {
-    const { parent } = run[0];
-    const contextFontsize = parent?.computedStyle.fontSize;
-    return joinLatex(
-      getPropertyRuns(run, 'fontSize').map((x) => {
-        const result = emitBackgroundColorRun(x, options);
-        const fontsize = x[0].computedStyle.fontSize;
-        if (fontsize && (!parent || contextFontsize !== fontsize)) {
-          return (
-            '\\' +
-            [
-              '',
-              'tiny',
-              'scriptsize',
-              'footnotesize',
-              'small',
-              'normalsize',
-              'large',
-              'Large',
-              'LARGE',
-              'huge',
-              'Huge',
-            ][fontsize] +
-            ' ' +
-            result
-          );
-        }
-        return result;
-      })
-    );
+  serialize(run: Atom[], options: ToLatexOptions): string[] {
+    const result = emitBoldRun(run, { ...options, defaultMode: 'math' });
+    if (result.length === 0 || options.defaultMode !== 'text') return result;
+    return ['$ ', ...result, ' $'];
   }
 
-  applyStyle(box: Box, style: Style): string | null {
-    // If no variant specified, don't change the font
-    if (style.variant === undefined) return '';
+  getFont(
+    box: Box,
+    style: {
+      // For math mode
+      fontFamily: string;
+      letterShapeStyle?: 'tex' | 'french' | 'iso' | 'upright';
+      variant: Variant;
+      variantStyle?: VariantStyle;
+    }
+  ): FontName | null {
+    console.assert(style.variant !== undefined);
 
-    // LetterShapeStyle will usually be set automatically, except when the
-    // locale cannot be determined, in which case its value will be 'auto'
-    // which we default to 'tex'
-    const letterShapeStyle =
-      style.letterShapeStyle === 'auto' || !style.letterShapeStyle
-        ? 'tex'
-        : style.letterShapeStyle;
+    if (style.fontFamily) {
+      const [fontName, classes] = VARIANTS[style.fontFamily];
+
+      if (classes) box.classes += ' ' + classes;
+
+      return fontName;
+    }
+
     let { variant } = style;
     let { variantStyle } = style;
 
@@ -199,16 +199,18 @@ export class MathMode extends Mode {
       variantStyle = 'italic';
     }
 
-    // 2. If no explicit variant style, auto-italicize some symbols,
-    // depending on the letterShapeStyle
+    // 2. Auto-italicize some symbols, depending on the letterShapeStyle
     if (variant === 'normal' && !variantStyle && box.value.length === 1) {
+      let italicize = false;
       LETTER_SHAPE_RANGES.forEach((x, i) => {
         if (
           x.test(box.value) &&
-          LETTER_SHAPE_MODIFIER[letterShapeStyle][i] === 'it'
+          LETTER_SHAPE_MODIFIER[style.letterShapeStyle ?? 'tex'][i] === 'it'
         )
-          variantStyle = 'italic';
+          italicize = true;
       });
+
+      if (italicize) variantStyle = addItalic(variantStyle);
     }
 
     // 3. Map the variant + variantStyle to a font
@@ -227,7 +229,20 @@ export class MathMode extends Mode {
       !VARIANT_REPERTOIRE[variant].test(box.value)
     ) {
       // Map to unicode character
-      box.value = mathVariantToUnicode(box.value, variant, variantStyle);
+      let v = mathVariantToUnicode(box.value, variant, variantStyle);
+      if (!v) {
+        // If we don't have an exact match, e.g. "bold blackboard d",
+        // try to find a match for the base character and add a class style
+        v = mathVariantToUnicode(box.value, variant) ?? box.value;
+
+        box.classes +=
+          {
+            'bold': ' ML__bold',
+            'italic': ' ML__it',
+            'bold-italic': ' ML__bold ML__it',
+          }[variantStyle ?? ''] ?? '';
+      }
+      box.value = v;
       // Return NULL to use default metrics
       return null;
     }
@@ -243,124 +258,81 @@ export class MathMode extends Mode {
   }
 }
 
-function emitVariantRun(run: Atom[], options: ToLatexOptions): string {
+function emitBoldRun(run: Atom[], options: ToLatexOptions): string[] {
+  return getPropertyRuns(run, 'bold').map((x) => {
+    const weight = weightString(x[0]);
+    if (weight !== 'bold') return joinLatex(emitVariantRun(x, options));
+
+    // If the parent is already bold, don't emit the bold command
+    if (weightString(x[0].parent!) === 'bold')
+      return joinLatex(emitVariantRun(x, options));
+
+    // Use '\mathbf' if possible, otherwise `\bm`. Note that `\bm` is
+    // not as well supported as `\mathbf` but it can handle more cases
+    // (i.e. greek letters, operators, variants, etc...)
+
+    // Get the content of the run
+    const value = joinLatex(x.map((x) => x.value ?? ''));
+    if (/^[a-zA-Z0-9]+$/.test(value)) {
+      return latexCommand('\\mathbf', joinLatex(emitVariantRun(x, options)));
+    }
+
+    // If the run contains a mix of characters, use `\bm`
+    return latexCommand('\\bm', joinLatex(emitVariantRun(x, options)));
+  });
+}
+
+function emitVariantRun(
+  run: Readonly<Atom[]>,
+  options: ToLatexOptions
+): string[] {
   const { parent } = run[0];
   const contextVariant = variantString(parent!);
-  const parentMode = parent?.mode ?? 'math';
-  return joinLatex(
-    getPropertyRuns(run, 'variant').map((x) => {
-      const variant = variantString(x[0]);
-      // Check if all the atoms in this run have a base
-      // variant identical to the current variant
-      // If so, we can skip wrapping them
-      if (
-        x.every((x) => {
-          const info = x.context.getDefinition(x.command!, parentMode);
-          if (!info || info.definitionType === 'function' || !info.variant)
-            return false;
+  return getPropertyRuns(run, 'variant').map((x) => {
+    const variant = variantString(x[0]);
+    let command = '';
+    if (variant && variant !== contextVariant) {
+      // Note that bold is handled separately, so we ignore it here.
+      command = {
+        'calligraphic': '\\mathcal',
+        'calligraphic-uo': '\\mathcal',
+        'fraktur': '\\mathfrak',
+        'fraktur-uo': '\\mathfrak',
+        'double-struck': '\\mathbb',
+        'double-struck-uo': '\\mathbb',
+        'script': '\\mathscr',
+        'script-uo': '\\mathscr',
+        'monospace': '\\mathtt',
+        'monospace-uo': '\\mathtt',
+        'sans-serif': '\\mathsf',
+        'sans-serif-uo': '\\mathsf',
+        'normal': '',
+        'normal-up': '\\mathrm',
+        'normal-italic': '\\mathnormal',
+        'normal-bold': '',
+        'normal-bolditalic': '\\mathbfit',
+        'ams': '',
+        'ams-up': '\\mathrm',
+        'ams-italic': '\\mathit',
+        'ams-bold': '',
+        'ams-bolditalic': '\\mathbfit',
+        'main': '',
+        'main-up': '\\mathrm',
+        'main-italic': '\\mathit',
+        'main-bold': '',
+        'main-bolditalic': '\\mathbfit',
+        // There are a few rare font families possible, which
+        // are not supported:
+        // mathbbm, mathbbmss, mathbbmtt, mathds, swab, goth
+        // In addition, the 'main' and 'math' font technically
+        // map to \mathnormal{}
+      }[variant!]!;
+      console.assert(command !== undefined);
+    }
 
-          return variantString(x) === variant;
-        })
-      )
-        return joinLatex(x.map((x) => Atom.serialize(x, options)));
-
-      let command = '';
-      if (variant && variant !== contextVariant) {
-        command = {
-          'calligraphic': '\\mathcal{',
-          'fraktur': '\\mathfrak{',
-          'double-struck': '\\mathbb{',
-          'script': '\\mathscr{',
-          'monospace': '\\mathtt{',
-          'sans-serif': '\\mathsf{',
-          'normal': '\\mathrm{',
-          'normal-italic': '\\mathnormal{',
-          'normal-bold': '\\mathbf{',
-          'normal-bolditalic': '\\mathbfit{',
-          'ams': '',
-          'ams-italic': '\\mathit{',
-          'ams-bold': '\\mathbf{',
-          'ams-bolditalic': '\\mathbfit{',
-          'main': '',
-          'main-italic': '\\mathit{',
-          'main-bold': '\\mathbf{',
-          'main-bolditalic': '\\mathbfit{',
-          // There are a few rare font families possible, which
-          // are not supported:
-          // mathbbm, mathbbmss, mathbbmtt, mathds, swab, goth
-          // In addition, the 'main' and 'math' font technically
-          // map to \mathnormal{}
-        }[variant!]!;
-        console.assert(command !== undefined);
-      }
-      if (!command) return joinLatex(x.map((x) => Atom.serialize(x, options)));
-      return (
-        command + joinLatex(x.map((x) => Atom.serialize(x, options))) + '}'
-      );
-    })
-  );
-}
-
-function emitColorRun(run: Atom[], options: ToLatexOptions): string {
-  const { parent } = run[0];
-  const contextColor = parent?.computedStyle.color;
-  return joinLatex(
-    getPropertyRuns(run, 'color').map((x) => {
-      const result = emitVariantRun(x, options);
-      const style = x[0].computedStyle;
-      if (
-        !(options.skipStyles ?? false) &&
-        style.color &&
-        (!parent || contextColor !== style.color)
-      ) {
-        return (
-          '\\textcolor{' +
-          (style.verbatimColor ?? style.color) +
-          '}{' +
-          result +
-          '}'
-        );
-      }
-
-      return result;
-    })
-  );
-}
-
-function emitBackgroundColorRun(run: Atom[], options: ToLatexOptions): string {
-  const { parent } = run[0];
-  const parentColor = parent?.computedStyle.backgroundColor;
-  return joinLatex(
-    getPropertyRuns(run, 'backgroundColor').map((x) => {
-      let result = emitColorRun(x, options);
-      const style = x[0].computedStyle;
-      if (
-        !(options.skipStyles ?? false) &&
-        result.trim() &&
-        style.backgroundColor &&
-        (!parent || parentColor !== style.backgroundColor) &&
-        (x.length > 0 || !(x[0] instanceof BoxAtom))
-      ) {
-        result = `\\ensuremath{${result}}`;
-
-        result = `\\colorbox{${
-          style.verbatimBackgroundColor ?? style.backgroundColor
-        }}{${result}}`;
-      }
-      return result;
-    })
-  );
-}
-
-function variantString(atom: Atom): string {
-  if (!atom) return '';
-  const { style } = atom;
-  if (style.variant === undefined) return '';
-  let result = style.variant;
-  if (style.variantStyle && style.variantStyle !== 'up')
-    result += '-' + style.variantStyle;
-
-  return result;
+    const arg = joinLatex(x.map((x) => x._serialize(options)));
+    return !command ? arg : latexCommand(command, arg);
+  });
 }
 
 // Singleton class

@@ -1,22 +1,24 @@
-import { ParseMode } from '../public/core';
+import { LatexAtom } from '../atoms/latex';
+import { suggest } from '../latex-commands/definitions-utils';
 
-import { LatexAtom } from '../core-atoms/latex';
-import { suggest } from '../core-definitions/definitions-utils';
+import type { _Model } from '../editor-model/model-private';
 
-import type { ModelPrivate } from '../editor-model/model-private';
+import {
+  hideSuggestionPopover,
+  showSuggestionPopover,
+} from '../editor/suggestion-popover';
 
-import { hidePopover, showPopover } from '../editor/popover';
-
-import type { MathfieldPrivate } from './mathfield-private';
-import { requestUpdate } from './render';
+import type { _Mathfield } from './mathfield-private';
+import { render } from './render';
 import {
   getLatexGroupBody,
   getCommandSuggestionRange,
   getLatexGroup,
 } from './mode-editor-latex';
 import { ModeEditor } from './mode-editor';
+import { ParseMode } from '../public/core-types';
 
-export function removeSuggestion(mathfield: MathfieldPrivate): void {
+export function removeSuggestion(mathfield: _Mathfield): void {
   const group = getLatexGroupBody(mathfield.model).filter(
     (x) => x.isSuggestion
   );
@@ -26,7 +28,7 @@ export function removeSuggestion(mathfield: MathfieldPrivate): void {
 }
 
 export function updateAutocomplete(
-  mathfield: MathfieldPrivate,
+  mathfield: _Mathfield,
   options?: { atIndex?: number }
 ): void {
   const { model } = mathfield;
@@ -34,15 +36,18 @@ export function updateAutocomplete(
   removeSuggestion(mathfield);
   for (const atom of getLatexGroupBody(model)) atom.isError = false;
 
-  if (!model.selectionIsCollapsed) {
-    hidePopover(mathfield);
+  if (
+    !model.selectionIsCollapsed ||
+    mathfield.options.popoverPolicy === 'off'
+  ) {
+    hideSuggestionPopover(mathfield);
     return;
   }
 
   // The current command is the sequence of atoms around the insertion point
   // that ends on the left with a '\' and on the right with a non-command
   // character.
-  const command: LatexAtom[] = [];
+  const commandAtoms: LatexAtom[] = [];
   let atom = model.at(model.position);
 
   while (atom && atom instanceof LatexAtom && /^[a-zA-Z\*]$/.test(atom.value))
@@ -51,54 +56,51 @@ export function updateAutocomplete(
   if (atom && atom instanceof LatexAtom && atom.value === '\\') {
     // We've found the start of a command.
     // Go forward and collect the potential atoms of the command
-    command.push(atom);
+    commandAtoms.push(atom);
     atom = atom.rightSibling;
     while (
       atom &&
       atom instanceof LatexAtom &&
       /^[a-zA-Z\*]$/.test(atom.value)
     ) {
-      command.push(atom);
+      commandAtoms.push(atom);
       atom = atom.rightSibling;
     }
   }
 
-  const commandString = command.map((x) => x.value).join('');
-  const suggestions = commandString ? suggest(mathfield, commandString) : [];
+  const command = commandAtoms.map((x) => x.value).join('');
+  const suggestions = suggest(mathfield, command);
 
   if (suggestions.length === 0) {
     // This looks like a command name, but not a known one
-    if (/^\\[a-zA-Z\*]+$/.test(commandString)) {
-      command.forEach((x) => {
-        x.isError = true;
-      });
-    }
+    if (/^\\[a-zA-Z\*]+$/.test(command))
+      for (const atom of commandAtoms) atom.isError = true;
 
-    hidePopover(mathfield);
+    hideSuggestionPopover(mathfield);
     return;
   }
 
-  mathfield.suggestionIndex = options?.atIndex ?? 0;
-  if (mathfield.suggestionIndex < 0)
-    mathfield.suggestionIndex = suggestions.length - 1;
+  const index = options?.atIndex ?? 0;
+  mathfield.suggestionIndex =
+    index < 0 ? suggestions.length - 1 : index % suggestions.length;
 
-  const suggestion =
-    suggestions[mathfield.suggestionIndex % suggestions.length];
-  if (suggestion !== commandString) {
-    const lastAtom = command[command.length - 1];
+  const suggestion = suggestions[mathfield.suggestionIndex];
+
+  if (suggestion !== command) {
+    const lastAtom = commandAtoms[commandAtoms.length - 1];
     lastAtom.parent!.addChildrenAfter(
-      [...suggestion.slice(commandString.length - suggestion.length)].map(
-        (x) => new LatexAtom(x, mathfield, { isSuggestion: true })
+      [...suggestion.slice(command.length - suggestion.length)].map(
+        (x) => new LatexAtom(x, { isSuggestion: true })
       ),
       lastAtom
     );
-    requestUpdate(mathfield);
+    render(mathfield, { interactive: true });
   }
 
-  showPopover(mathfield, suggestions);
+  showSuggestionPopover(mathfield, suggestions);
 }
 
-export function acceptCommandSuggestion(model: ModelPrivate): boolean {
+export function acceptCommandSuggestion(model: _Model): boolean {
   const [from, to] = getCommandSuggestionRange(model, {
     before: model.position,
   });
@@ -118,25 +120,30 @@ export function acceptCommandSuggestion(model: ModelPrivate): boolean {
  *
  */
 export function complete(
-  mathfield: MathfieldPrivate,
-  completion: 'reject' | 'accept' | 'accept-suggestion' = 'accept',
+  mathfield: _Mathfield,
+  completion:
+    | 'reject'
+    | 'accept'
+    | 'accept-suggestion'
+    | 'accept-all' = 'accept',
   options?: { mode?: ParseMode; selectItem?: boolean }
 ): boolean {
-  hidePopover(mathfield);
+  hideSuggestionPopover(mathfield);
   const latexGroup = getLatexGroup(mathfield.model);
   if (!latexGroup) return false;
 
-  if (completion === 'accept-suggestion') {
+  if (completion === 'accept-suggestion' || completion === 'accept-all') {
     const suggestions = getLatexGroupBody(mathfield.model).filter(
       (x) => x.isSuggestion
     );
-    if (suggestions.length === 0) return false;
-    for (const suggestion of suggestions) suggestion.isSuggestion = false;
+    if (suggestions.length !== 0) {
+      for (const suggestion of suggestions) suggestion.isSuggestion = false;
 
-    mathfield.model.position = mathfield.model.offsetOf(
-      suggestions[suggestions.length - 1]
-    );
-    return true;
+      mathfield.model.position = mathfield.model.offsetOf(
+        suggestions[suggestions.length - 1]
+      );
+    }
+    if (completion === 'accept-suggestion') return suggestions.length !== 0;
   }
 
   const body = getLatexGroupBody(mathfield.model).filter(
@@ -148,16 +155,18 @@ export function complete(
   const newPos = latexGroup.leftSibling;
   latexGroup.parent!.removeChild(latexGroup);
   mathfield.model.position = mathfield.model.offsetOf(newPos);
-  mathfield.mode = options?.mode ?? 'math';
+  mathfield.switchMode(options?.mode ?? 'math');
 
   if (completion === 'reject') return true;
 
-  ModeEditor.insert('math', mathfield.model, latex, {
+  ModeEditor.insert(mathfield.model, latex, {
     selectionMode: options?.selectItem ?? false ? 'item' : 'placeholder',
     format: 'latex',
+    mode: 'math',
   });
 
   mathfield.snapshot();
   mathfield.model.announce('replacement');
+  mathfield.switchMode('math');
   return true;
 }

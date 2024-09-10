@@ -3,43 +3,40 @@
     "rootDir": ".",
     "outDir": "build",
 
-    // vue-cli depends on webpack4 which doesn't support es2020. webpack 5 does.
-    // so, to support version of vue-cli that are in use (August 2021),
-    // downgrade target to es2019.
-    "target": "es2019",
-    "module": "es2020", // es2020 includes support for dynamic imports, and import.meta
+    // es2018: async iterators, rest/spread for objects, RegExp named capture groups, RegExp Unicode property escapes, Promise.prototype.finally
+    // es2020: nullish coalescing, optional chaining, BigInt, dynamic import, import.meta
+    // es2022: private fields, top-level await
+    // esnext: all the above + decorators, class fields, export * as ns, export * from, numeric separators, throw expressions
+    "target": "es2020",
+    "module": "esnext",
     "esModuleInterop": true,
     "moduleResolution": "node",
     "resolveJsonModule": true,
+
+    "strictNullChecks": true,
+    "strictBindCallApply": true,
+    "noImplicitAny": false,
+    "noLib": false,
 
     "lib": ["es2020", "dom", "dom.iterable", "scripthost"],
     // Do not include all the type definitions in `node_modules/@types`,
     // which include NodeJS definitions that are not applicable to a web app
     // but only those type definitions that are required
-    "typeRoots": [],
-    "types": [
-      "./node_modules/@types/css-font-loading-module",
-      "./node_modules/@types/jest"
-    ],
+    "typeRoots": ["./src/public", "./src/ui/types"],
+    // "types": ["@cortex-js/compute-engine"],
 
     "emitDecoratorMetadata": false,
-    "experimentalDecorators": false,
 
-    // Test files for Jest are in JS
-    // "allowJs": true,
-
-    "strictNullChecks": true,
-    "noImplicitAny": false,
-    "noLib": false,
-
-    // We'll strip the comments with rollup but we need them for the declaration files
+    // We'll strip the comments with esbuild but we need them for the declaration files
     "removeComments": false,
-    "baseUrl": "src",
+    "baseUrl": "./src/",
     "sourceMap": true,
 
     "incremental": true,
     "tsBuildInfoFile": "./build/ts-cache.tsbuildinfo"
   },
+  // "include": []
+  // "files: []   // If you want to include only specific files (paths relative to the tsconfig.json file)
   "exclude": [
     "coverage",
     "test",
@@ -50,6 +47,7 @@
     "examples",
     "docs",
     "tutorials",
-    "**/*.config.js"
+    "**/*.config.js",
+    "playwright.config.ts"
   ]
 }

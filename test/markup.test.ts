@@ -1,7 +1,10 @@
-import { convertLatexToMarkup, validateLatex } from '../src/mathlive';
+import {
+  convertLatexToMarkup,
+  validateLatex,
+} from '../src/public/mathlive-ssr';
 
 function markupAndError(formula: string): [string, string] {
-  const markup = convertLatexToMarkup(formula, { mathstyle: 'displaystyle' });
+  const markup = convertLatexToMarkup(formula, { defaultMode: 'math' });
   const errors = validateLatex(formula);
   if (errors.length === 0) return [markup, 'no-error'];
   return [markup, errors[0].code];
@@ -14,12 +17,22 @@ function error(expression: string) {
 }
 
 describe('MODE SHIFT', () => {
-  test.each(['\\text{\\ensuremath{\\frac34}}'])(
-    '%#/ %s renders correctly',
-    (a) => {
-      expect(markupAndError(a)).toMatchSnapshot();
-    }
-  );
+  test.each([
+    '\\text{\\ensuremath{\\frac34}}',
+    '1+\\textcolor{blue}{$ 2 $}+3+\\textcolor{red}{4}+\\text{5\\textcolor{purple}{6}}',
+  ])('%#/ %s renders correctly', (a) => {
+    expect(markupAndError(a)).toMatchSnapshot();
+  });
+});
+
+describe('COMMANDS', () => {
+  test('Commands ', () => {
+    expect(
+      markupAndError(
+        `\\!\\#\\%\\&\\$\\_\\{\\}\\text{\\'{a}\\"{a}\\.{a}\\\`{a}\\={a}\\~{a}\\^{a}}`
+      )
+    ).toMatchSnapshot();
+  });
 });
 
 describe('FONTS', () => {
@@ -65,6 +78,17 @@ describe('FRACTIONS', function () {
   ])('%#/ %s renders correctly', (x) => {
     expect(markupAndError(x)).toMatchSnapshot();
   });
+});
+
+describe('NOT', () => {
+  test.each([
+    '\\not\\in \\not{}\\in \\not{}\\in \\not\\in',
+    '\\not= \\not{}= \\not{}= \\not=',
+    '\\not= \\ne \\neq',
+    '\\not',
+  ])('%#/ %s renders correctly', (a) =>
+    expect(markupAndError(a)).toMatchSnapshot()
+  );
 });
 
 describe('RULE AND DIMENSIONS', function () {
@@ -130,6 +154,8 @@ describe('OVER/UNDERLINE', () => {
 
 describe('SPACING AND KERN', () => {
   test.each([
+    'a+{}b+c',
+    '123\\colorbox{red}456',
     'a\\hskip 3em b',
     'a\\kern 3em b',
     'a\\hspace{3em} b',
@@ -166,6 +192,9 @@ function testLeftRightDelimiter(openDel, closeDel) {
 describe('SUPERSCRIPT/SUBSCRIPT', () => {
   test('-1-\\frac56-1-x^{2-\\frac34}', () => {
     expect(markupAndError('-1-\\frac56-1-x^{2-\\frac34}')).toMatchSnapshot();
+  });
+  test('\\left(x+1\\right)^2', () => {
+    expect(markupAndError('\\left(x+1\\right)^2')).toMatchSnapshot();
   });
 });
 
@@ -209,10 +238,13 @@ describe('LEFT/RIGHT', () => {
   test('middle delimiters', () => {
     expect(markupAndError('\\left(a\\middle|b\\right)')).toMatchSnapshot();
     expect(markupAndError('\\left(a\\middle xb\\right)')).toMatchSnapshot();
+    expect(
+      markupAndError('\\left(a\\color{red}\\middle|b\\right)')
+    ).toMatchSnapshot();
   });
 });
 
-describe('DELIMTIER SIZING COMMANDS', () => {
+describe('DELIMITER SIZING COMMANDS', () => {
   test.each([
     ['\\bigl', '\\bigr', '\\bigm', '\\big'],
     ['\\Bigl', '\\Bigr', '\\Bigm', '\\Big'],
@@ -253,15 +285,15 @@ describe('ENVIRONMENTS', function () {
 
   test.each([
     '\\begin',
-    '\\begin{a}',
-    '\\begin{a}\\end',
-    '\\begin{a}\\end{x}',
+    '\\begin{bmatrix}',
+    '\\begin{bmatrix}\\end',
+    '\\begin{bmatrix}\\end{Bmatrix}',
     '\\begin{a}\\end{a}',
-    '\\begin{array}{ll}\\end{a}',
-    '\\begin{array}{ll}xyz\\end{a}',
+    '\\begin{array}{ll}\\end{bmatrix}',
+    '\\begin{array}{ll}xyz\\end{bmatrix}',
     '\\begin{array}{ll}xyz',
     '\\begin{array}{ll}xyz',
-    '\\begin{\\alpha}',
+    '\\begin{\\alpha}\\end{\\alpha}',
     '\\begin{.}\\end{.}',
     '\\begin{(}\\end{(}',
   ])('%#/ %s errors', (x) => {
@@ -306,6 +338,7 @@ describe('NOT', () => {
   test.each([
     'a \\ne b',
     'a \\neq b',
+    '\\not= \\not{=} a \\neq b \\ne c \\not< d \\not{h} e\\not{}',
     'a\\not= b',
     'a\\not< b',
     'a\\not{c} b',
@@ -325,13 +358,12 @@ describe('NOT', () => {
 // ////////////////////////////////////////////////////////////////////////////////
 describe('COLORS', function () {
   test.each([
-    '\\sin x \\textcolor{#f00}{red} \\colorbox{yellow}{x + \\frac1{\\frac34}} \\textcolor{m1}{\\blacktriangle}\\textcolor{m2}{\\blacktriangle}\\textcolor{m3}{\\blacktriangle}\\textcolor{m4}{\\blacktriangle}\\textcolor{m5}{\\blacktriangle}\\textcolor{m6}{\\blacktriangle}\\textcolor{m7}{\\blacktriangle}\\textcolor{m8}{\\blacktriangle}\\textcolor{m9}{\\blacktriangle}',
-    'a+\\colorbox{#f00}{\\frac1{\\frac{a+1}{b+c}}}',
-    'a+\\colorbox{#f00}{\\frac{\\frac{\\frac{1}{2}}{c}}{\\frac{a+1}{b+c}}}',
-    'a+\\colorbox{#f00}{\\frac{\\frac{\\frac{1}{2}}{c}}{a}',
-    'a+\\colorbox{#f00}{\\frac1{\\frac{a+1}{b+c}}}',
-    'a+\\colorbox{#f00}{\\frac{\\frac{\\frac{1}{2}}{c}}{\\frac{a+1}{b+c}}}',
-    'a+\\colorbox{#f00}{\\frac{\\frac{\\frac{1}{2}}{c}}{a}',
+    '\\sin x \\textcolor{#f00}{red} \\colorbox{yellow}{$x + \\frac1{\\frac34}$} \\textcolor{m1}{\\blacktriangle}\\textcolor{m2}{\\blacktriangle}\\textcolor{m3}{\\blacktriangle}\\textcolor{m4}{\\blacktriangle}\\textcolor{m5}{\\blacktriangle}\\textcolor{m6}{\\blacktriangle}\\textcolor{m7}{\\blacktriangle}\\textcolor{m8}{\\blacktriangle}\\textcolor{m9}{\\blacktriangle}',
+    'a+\\colorbox{#f00}{$\\frac1{\\frac{a+1}{b+c}}$}',
+    'a+\\colorbox{#f00}{$\\frac{\\frac{\\frac{1}{2}}{c}}{\\frac{a+1}{b+c}}$}',
+    'a+\\colorbox{#f00}{$\\frac{\\frac{\\frac{1}{2}}{c}}{a}$}',
+    'a+\\colorbox{#f00}{$\\frac1{\\frac{a+1}{b+c}}$}',
+    'a+\\colorbox{#f00}{$\\frac{\\frac{\\frac{1}{2}}{c}}{\\frac{a+1}{b+c}}$}',
     'a{b\\color{#f00} c}d',
     'a\\left(b\\color{#f00} c\\right)d',
     `{\\color{Apricot}\\blacksquare}{\\color{Aquamarine}\\blacksquare}

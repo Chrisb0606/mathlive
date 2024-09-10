@@ -1,3 +1,4 @@
+import { Selector } from '../public/commands';
 import type { Keybinding } from '../public/options';
 
 export const DEFAULT_KEYBINDINGS: Keybinding[] = [
@@ -29,56 +30,45 @@ export const DEFAULT_KEYBINDINGS: Keybinding[] = [
   { key: 'shift+ctrl+[ArrowLeft]', command: 'extendToGroupStart' },
   { key: 'shift+ctrl+[ArrowRight]', command: 'extendToGroupEnd' },
 
-  { key: '[Space]', ifMode: 'math', command: 'moveAfterParent' },
-  { key: 'shift+[Space]', ifMode: 'math', command: 'moveBeforeParent' },
-
-  { key: '[Home]', command: 'moveToMathFieldStart' },
-  { key: 'cmd+[ArrowLeft]', command: 'moveToMathFieldStart' },
+  { key: '[Home]', command: 'moveToMathfieldStart' },
+  { key: 'cmd+[ArrowLeft]', command: 'moveToMathfieldStart' },
   { key: 'shift+[Home]', command: 'extendToMathFieldStart' },
   { key: 'shift+cmd+[ArrowLeft]', command: 'extendToMathFieldStart' },
 
-  { key: '[End]', command: 'moveToMathFieldEnd' },
-  { key: 'cmd+[ArrowRight]', command: 'moveToMathFieldEnd' },
+  { key: '[End]', command: 'moveToMathfieldEnd' },
+  { key: 'cmd+[ArrowRight]', command: 'moveToMathfieldEnd' },
   { key: 'shift+[End]', command: 'extendToMathFieldEnd' },
   { key: 'shift+cmd+[ArrowRight]', command: 'extendToMathFieldEnd' },
 
   { key: '[Pageup]', command: 'moveToGroupStart' },
   { key: '[Pagedown]', command: 'moveToGroupEnd' },
 
-  { key: '[Tab]', ifMode: 'math', command: 'moveToNextPlaceholder' },
+  { key: '[Tab]', command: 'moveToNextGroup' },
   {
     key: 'shift+[Tab]',
-    ifMode: 'math',
-    command: 'moveToPreviousPlaceholder',
-  },
-
-  { key: '[Tab]', ifMode: 'text', command: 'moveToNextPlaceholder' },
-  {
-    key: 'shift+[Tab]',
-    ifMode: 'text',
-    command: 'moveToPreviousPlaceholder',
+    command: 'moveToPreviousGroup',
   },
 
   { key: '[Escape]', ifMode: 'math', command: ['switchMode', 'latex'] },
   { key: '[Escape]', ifMode: 'text', command: ['switchMode', 'latex'] },
-
-  {
-    key: '\\',
-    ifMode: 'math',
-    command: ['switchMode', 'latex', '\\'],
-  },
-  // { key: '[Backslash]', ifMode: 'math', command: ['switchMode', 'latex'] },
-  {
-    key: '[IntlBackslash]',
-    ifMode: 'math',
-    command: ['switchMode', 'latex', '\\'],
-  }, // On UK QWERTY keyboards
-
   {
     key: '[Escape]',
     ifMode: 'latex',
     command: ['complete', 'complete', { selectItem: 'true' }],
   }, // Accept the entry (without the suggestion) and select
+
+  {
+    key: '\\',
+    ifMode: 'math',
+    command: ['switchMode', 'latex', '', '\\'],
+  },
+  // { key: '[Backslash]', ifMode: 'math', command: ['switchMode', 'latex'] },
+  {
+    key: '[IntlBackslash]',
+    ifMode: 'math',
+    command: ['switchMode', 'latex', '', '\\'],
+  }, // On UK QWERTY keyboards
+
   {
     key: '[Tab]',
     ifMode: 'latex',
@@ -104,25 +94,35 @@ export const DEFAULT_KEYBINDINGS: Keybinding[] = [
   { key: '[Copy]', command: 'copyToClipboard' },
   { key: '[Paste]', command: 'pasteFromClipboard' },
   { key: '[Clear]', command: 'deleteBackward' },
+  { key: '[Undo]', command: 'undo' },
+  { key: '[Redo]', command: 'redo' },
+  { key: '[EraseEof]', command: 'deleteToGroupEnd' },
+
+  // Safari on iOS does not send cut/copy/paste commands when the mathfield
+  // is focused, so intercept the keyboard shortcuts.
+  // This is less desirable because the full clipboard API is not accessible
+  // by this path, and user authorization is required.
+  { key: 'ctrl+x', ifPlatform: 'ios', command: 'cutToClipboard' },
+  { key: 'cmd+x', ifPlatform: 'ios', command: 'cutToClipboard' },
+  { key: 'ctrl+c', ifPlatform: 'ios', command: 'copyToClipboard' },
+  { key: 'cmd+c', ifPlatform: 'ios', command: 'copyToClipboard' },
+  { key: 'ctrl+v', ifPlatform: 'ios', command: 'pasteFromClipboard' },
+  { key: 'cmd+v', ifPlatform: 'ios', command: 'pasteFromClipboard' },
 
   { key: 'ctrl+z', ifPlatform: '!macos', command: 'undo' },
   { key: 'cmd+z', command: 'undo' },
-  { key: '[Undo]', command: 'undo' },
   { key: 'ctrl+y', ifPlatform: '!macos', command: 'redo' }, // ARIA recommendation
   { key: 'shift+cmd+y', command: 'redo' },
   { key: 'shift+ctrl+z', ifPlatform: '!macos', command: 'redo' },
   { key: 'shift+cmd+z', command: 'redo' },
-  { key: '[Redo]', command: 'redo' },
-
-  { key: '[EraseEof]', command: 'deleteToGroupEnd' },
 
   // EMACS/MACOS BINDINGS
   { key: 'ctrl+b', ifPlatform: 'macos', command: 'moveToPreviousChar' },
   { key: 'ctrl+f', ifPlatform: 'macos', command: 'moveToNextChar' },
   { key: 'ctrl+p', ifPlatform: 'macos', command: 'moveUp' },
   { key: 'ctrl+n', ifPlatform: 'macos', command: 'moveDown' },
-  { key: 'ctrl+a', ifPlatform: 'macos', command: 'moveToMathFieldStart' },
-  { key: 'ctrl+e', ifPlatform: 'macos', command: 'moveToMathFieldEnd' },
+  { key: 'ctrl+a', ifPlatform: 'macos', command: 'moveToMathfieldStart' },
+  { key: 'ctrl+e', ifPlatform: 'macos', command: 'moveToMathfieldEnd' },
   {
     key: 'shift+ctrl+b',
     ifPlatform: 'macos',
@@ -191,17 +191,8 @@ export const DEFAULT_KEYBINDINGS: Keybinding[] = [
   // ctrl+- to delete a row or columns
 
   // MATHLIVE BINDINGS
-  // { key: 'alt+a', command: ['insert', '\\theta'] },
   { key: 'alt+p', ifMode: 'math', command: ['insert', '\\pi'] },
   { key: 'alt+v', ifMode: 'math', command: ['insert', '\\sqrt{#0}'] },
-  {
-    key: 'alt+w',
-    ifMode: 'math',
-    command: ['insert', '\\sum_{i=#?}^{#?}'],
-  },
-  { key: 'alt+b', command: ['insert', '\\int_{#?}^{#?}'] },
-  { key: 'alt+u', ifMode: 'math', command: ['insert', '\\cup'] },
-  { key: 'alt+n', ifMode: 'math', command: ['insert', '\\cap'] },
   { key: 'alt+o', ifMode: 'math', command: ['insert', '\\emptyset'] },
   {
     key: 'alt+d',
@@ -218,15 +209,6 @@ export const DEFAULT_KEYBINDINGS: Keybinding[] = [
     ifMode: 'math',
     command: ['insert', '\\partial'],
   },
-  {
-    key: 'shift+alt+p',
-    ifMode: 'math',
-    command: ['insert', '\\prod_{i=#?}^{#?}'],
-  },
-  { key: 'shift+alt+u', ifMode: 'math', command: ['insert', '\\bigcup'] },
-  { key: 'shift+alt+n', ifMode: 'math', command: ['insert', '\\bigcap'] },
-  { key: 'shift+alt+a', ifMode: 'math', command: ['insert', '\\forall'] },
-  { key: 'shift+alt+e', ifMode: 'math', command: ['insert', '\\exists'] },
   {
     key: 'alt+[Backslash]',
     ifMode: 'math',
@@ -246,7 +228,8 @@ export const DEFAULT_KEYBINDINGS: Keybinding[] = [
 
   // Accessibility
   { key: 'shift+alt+k', command: 'toggleKeystrokeCaption' },
-  { key: 'alt+[Space]', command: 'toggleVirtualKeyboard' },
+  { key: 'alt+[Space]', command: 'toggleContextMenu' },
+  { key: 'alt+shift+[Space]', command: 'toggleVirtualKeyboard' as Selector },
 
   // Note: On Mac OS (as of 10.12), there is a bug/behavior that causes
   // a beep to be generated with certain command+control key combinations.
@@ -273,28 +256,28 @@ export const DEFAULT_KEYBINDINGS: Keybinding[] = [
   // only work with specific keyboard layouts
   //
   {
-    key: 'alt+[Equal]',
-    ifLayout: ['apple.en-intl', 'windows.en-intl', 'linux.en'],
-    ifMode: 'math',
-    command: ['applyStyle', { mode: 'text' }],
-  },
-  {
-    key: 'alt+[Equal]',
-    ifLayout: ['apple.en-intl', 'windows.en-intl', 'linux.en'],
-    ifMode: 'text',
-    command: ['applyStyle', { mode: 'math' }],
-  },
-  {
     key: 'shift+[Quote]',
     ifLayout: ['apple.en-intl', 'windows.en-intl', 'linux.en'],
     ifMode: 'math',
     command: ['switchMode', 'text', '', ''],
+    // command: ['switchMode', 'text', '', '«'],
   },
   {
     key: 'shift+[Quote]',
     ifLayout: ['apple.en-intl', 'windows.en-intl', 'linux.en'],
     ifMode: 'text',
     command: ['switchMode', 'math', '', ''],
+    // command: ['switchMode', 'math', '»', ''],
+  },
+  {
+    key: 'shift+alt+[KeyT]',
+    ifMode: 'math',
+    command: ['switchMode', 'text'],
+  },
+  {
+    key: 'shift+alt+[KeyT]',
+    ifMode: 'text',
+    command: ['switchMode', 'math'],
   },
   {
     key: '/',
@@ -305,7 +288,13 @@ export const DEFAULT_KEYBINDINGS: Keybinding[] = [
     key: 'alt+/',
     ifLayout: ['apple.en-intl', 'windows.en-intl', 'linux.en'],
     ifMode: 'math',
-    command: ['insert', '\\/'],
+    command: ['insert', '/'],
+  },
+  {
+    key: 'alt+shift+/',
+    ifLayout: ['apple.en-intl', 'windows.en-intl', 'linux.en'],
+    ifMode: 'math',
+    command: ['insert', '/'],
   },
   {
     key: 'alt+[BracketLeft]',
@@ -360,30 +349,38 @@ export const DEFAULT_KEYBINDINGS: Keybinding[] = [
     command: 'removeRow',
   },
 
-  {
-    key: 'ctrl+[Comma]',
-    ifLayout: ['apple.en-intl', 'windows.en-intl', 'linux.en'],
-    ifMode: 'math',
-    command: 'addColumnAfter',
-  },
-  {
-    key: 'cmd+[Comma]',
-    ifLayout: ['apple.en-intl', 'windows.en-intl', 'linux.en'],
-    ifMode: 'math',
-    command: 'addColumnAfter',
-  },
-  {
-    key: 'shift+ctrl+[Comma]',
-    ifLayout: ['apple.en-intl', 'windows.en-intl', 'linux.en'],
-    ifMode: 'math',
-    command: 'addColumnBefore',
-  },
-  {
-    key: 'shift+cmd+[Comma]',
-    ifLayout: ['apple.en-intl', 'windows.en-intl', 'linux.en'],
-    ifMode: 'math',
-    command: 'addColumnBefore',
-  },
+  // {
+  //   key: 'ctrl+[Comma]',
+  //   ifLayout: ['apple.en-intl', 'windows.en-intl', 'linux.en'],
+  //   ifMode: 'math',
+  //   command: 'addColumnAfter',
+  // },
+  // {
+  //   key: 'cmd+[Comma]',
+  //   ifLayout: ['apple.en-intl', 'windows.en-intl', 'linux.en'],
+  //   ifMode: 'math',
+  //   command: 'addColumnAfter',
+  // },
+  // {
+  //   key: 'shift+ctrl+[Comma]',
+  //   ifLayout: ['apple.en-intl', 'windows.en-intl', 'linux.en'],
+  //   ifMode: 'math',
+  //   command: 'addColumnBefore',
+  // },
+  // {
+  //   key: 'shift+cmd+[Comma]',
+  //   ifLayout: ['apple.en-intl', 'windows.en-intl', 'linux.en'],
+  //   ifMode: 'math',
+  //   command: 'addColumnBefore',
+  // },
+
+  { key: 'alt+[Tab]', ifMode: 'math', command: 'addColumnAfter' },
+  { key: 'shift+alt+[Tab]', ifMode: 'math', command: 'addColumnBefore' },
+  { key: 'alt+[Enter]', ifMode: 'math', command: 'addRowAfter' },
+  { key: 'shift+alt+[Enter]', ifMode: 'math', command: 'addRowBefore' },
+  { key: 'alt+[Return]', ifMode: 'math', command: 'addRowAfter' },
+  { key: 'shift+alt+[Return]', ifMode: 'math', command: 'addRowBefore' },
+
   {
     key: 'shift+[Backspace]',
     ifMode: 'math',
@@ -396,19 +393,6 @@ export const DEFAULT_KEYBINDINGS: Keybinding[] = [
     ifMode: 'math',
     command: ['insert', '$\\infty'],
   }, // "%" key
-  {
-    key: 'alt+[Digit6]',
-    ifLayout: ['apple.en-intl', 'windows.en-intl', 'linux.en'],
-    ifMode: 'math',
-    command: ['insert', '\\wedge'],
-  }, // "^" key
-  {
-    key: 'shift+alt+[Digit6]',
-    ifLayout: ['apple.en-intl', 'windows.en-intl', 'linux.en'],
-
-    ifMode: 'math',
-    command: ['insert', '\\vee'],
-  }, // "^" key
   {
     key: 'alt+[Digit9]',
     ifLayout: ['apple.en-intl', 'windows.en-intl', 'linux.en'],
@@ -440,6 +424,18 @@ export const DEFAULT_KEYBINDINGS: Keybinding[] = [
     ifMode: 'math',
     command: ['insert', '^2'],
   },
+  {
+    key: '[Backquote]',
+    ifLayout: ['windows.german', 'linux.german'],
+    ifMode: 'math',
+    command: ['insert', '^'],
+  },
+  {
+    key: '[IntlBackslash]',
+    ifLayout: ['apple.german'],
+    ifMode: 'math',
+    command: ['insert', '^'],
+  },
 ];
 
 /**
@@ -451,21 +447,9 @@ export const DEFAULT_KEYBINDINGS: Keybinding[] = [
  * keybindings for specific commands in the popover.
  */
 export const REVERSE_KEYBINDINGS = {
-  '\\theta': 'alt+q',
   '\\sqrt': ['alt+v', 'ctrl+[Digit2]'],
   '\\pi': 'alt+p',
-  '\\prod': 'shift+alt+p',
-  '\\sum': 'alt+w',
-  '\\int': 'alt+b',
-  '\\cup': 'alt+u',
-  '\\cap': 'alt+n',
-  '\\bigcup': 'shift+alt+u',
-  '\\bigcap': 'shift+alt+n',
-  '\\forall': 'shift+alt+a',
-  '\\exists': 'shift+alt+e',
   '\\infty': 'alt+[Digit5]',
-  '\\wedge': 'alt+[Digit6]',
-  '\\vee': 'shift+alt+[Digit6]',
   '\\differentialD': 'alt+d',
   '\\partial': 'shift+alt+d',
   '\\frac': 'Slash',

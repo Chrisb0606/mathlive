@@ -1,56 +1,38 @@
-import type { Style, ParseMode, FontSize } from '../public/core';
-import MathfieldElement from '../public/mathfield-element';
-
-import { isArray } from '../common/types';
-
-import { unicodeCharToLatex } from '../core-definitions/definitions-utils';
-
-import { GlobalContext, Context, PrivateStyle } from './context';
+import type { ParseMode, Style, FontSize } from '../public/core-types';
 
 import { PT_PER_EM, X_HEIGHT } from './font-metrics';
-import { BoxType, isBoxType, Box } from './box';
+import { boxType, Box } from './box';
 import { makeLimitsStack, VBox } from './v-box';
-import { joinLatex } from './tokenizer';
-import { getModeRuns, getPropertyRuns, Mode } from './modes-utils';
-import { MathfieldBox } from './mathfield-box';
+import { joinLatex, latexCommand } from './tokenizer';
+import { Mode, weightString } from './modes-utils';
+import { getDefinition } from '../latex-commands/definitions-utils';
 
-/**
- * This data type is used as a serialized representation of the  atom tree.
- * This is used by the Undo Manager to store the state of the mathfield.
- * While in many cases the LaTeX representation of the mathfield could be used
- * there are a few cases where the atom will carry additional information
- * that is difficult/impossible to represent in pure LaTeX, for example
- * the state/content of empty branches.
- */
-export type AtomJson = { type: AtomType; [key: string]: any };
-
-/**
- * Each atom can have one or more "branches" of child atoms.
- */
-export type BranchName =
-  | 'above'
-  | 'body'
-  | 'below'
-  | 'superscript'
-  | 'subscript';
+import { Context } from './context';
+import type {
+  PrivateStyle,
+  BoxType,
+  AtomJson,
+  AtomOptions,
+  AtomType,
+  Branches,
+  ToLatexOptions,
+  BranchName,
+  Branch,
+} from './types';
+import type { Argument } from 'latex-commands/types';
+import { addBold } from 'editor-model/styling';
 
 /**
  * The order of these branches specify the default keyboard navigation order.
  * It can be overriden in `get children()`
  */
 export const NAMED_BRANCHES: BranchName[] = [
-  'above',
   'body',
+  'above',
   'below',
   'superscript',
   'subscript',
 ];
-
-/**
- * In addition to a "named" branch, a branch can also be identified as a cell
- * in a tabular atom (matrix, etc...) with a row and column number.
- */
-export type Branch = BranchName | [row: number, col: number];
 
 /**
  * A _branch_ is a set of children of an atom.
@@ -69,71 +51,6 @@ export function isCellBranch(branch?: Branch): branch is [number, number] {
   return branch !== undefined && Array.isArray(branch) && branch.length === 2;
 }
 
-export type Branches = {
-  [branch in BranchName]?: Atom[];
-};
-
-export type ToLatexOptions = {
-  expandMacro?: boolean;
-  // If true, don't emit a mode command such as `\text`
-  skipModeCommand?: boolean;
-  // If true, don't emit color, backgroundcolor, styling commands
-  skipStyles?: boolean;
-  // Don't emit unnecessary style shift commands: you can assume we're in
-  // this default mode.
-  defaultMode: 'math' | 'text' | 'inline-math';
-};
-
-export type AtomType =
-  | 'accent'
-  | 'array' // A group, which has children arranged in rows. Used
-  // by environments such as `matrix`, `cases`, etc...
-  | 'box' // A border drawn around an expression and change its background color
-  | 'chem' // A chemical formula (mhchem)
-  | 'choice' // A \\mathchoice command
-  | 'composition' // IME composition area
-  | 'delim'
-  | 'enclose'
-  | 'error' //  An unknown command, for example `\xyzy`. The text  is displayed with a wavy red underline in the editor.
-  | 'first' // A special, empty, atom put as the first atom in math lists in
-  // order to be able to position the caret before the first element. Aside from
-  // the caret, they display nothing.
-  | 'genfrac' // A generalized fraction: a numerator and denominator, separated
-  // by an optional line, and surrounded by optional fences
-  | 'group' // A simple group of atoms, for example from a `{...}`
-  | 'latex' // A raw latex atom
-  | 'latexgroup' // A string of raw latex atoms
-  | 'leftright' // Used by the `\left` and `\right` commands
-  | 'line' // Used by `\overline` and `\underline`
-  | 'macro'
-  | 'mbin' // Binary operator: `+`, `*`, etc...
-  | 'mclose' // Closing fence: `)`, `\rangle`, etc...
-  | 'minner' // Special layout cases, fraction, overlap, `\left...\right`
-  | 'mop' // `mop`: operators, including special functions, `\sin`, `\sum`, `\cap`.
-  | 'mopen' // Opening fence: `(`, `\langle`, etc...
-  | 'mord' // Ordinary symbol, e.g. `x`, `\alpha`
-  | 'mpunct' // Punctuation: `,`, `:`, etc...
-  | 'mrel' // Relational operator: `=`, `\ne`, etc...
-  | 'msubsup' // A carrier for a superscript/subscript
-  | 'overlap' // Display a symbol _over_ another
-  | 'overunder' // Displays an annotation above or below a symbol
-  | 'placeholder' // A temporary item. Placeholders are displayed as a dashed square in the editor.
-  | 'phantom'
-  | 'root' // A group, which has no parent (only one per formula)
-  | 'rule' // Draw a line, for the `\rule` command
-  | 'sizeddelim' // A delimiter that can grow
-  | 'space'
-  | 'spacing'
-  | 'surd' // Aka square root, nth root
-  | 'text' // Text mode atom;
-  | 'tooltip'; // For `\mathtip` and `\texttip`
-
-export type BBoxParameter = {
-  backgroundcolor?: string;
-  padding?: string;
-  border?: string;
-};
-
 /**
  * An atom is an object encapsulating an elementary mathematical unit,
  * independent of its graphical representation.
@@ -141,49 +58,45 @@ export type BBoxParameter = {
  * It keeps track of the content, while the dimensions, position and style
  * are tracked by Box objects which are created by the `createBox()` function.
  */
-export class Atom {
-  context: GlobalContext;
-
+export class Atom<T extends (Argument | null)[] = (Argument | null)[]> {
+  // The root has no parent. Every other atom has one.
   parent: Atom | undefined;
 
   // An atom can have multiple "branches" of children,
   // e.g. `body` and `superscript`.
   //
-  // The `treeBranch` property indicate which branch of the parent this
+  // The `parentBranch` property indicate which branch of the parent this
   // atom belongs to or if in an array, the row and column
-  treeBranch: Branch | undefined;
+  parentBranch: Branch | undefined;
 
   value: string; // If no branches
 
   // Used to match a DOM element to an Atom
-  // (the corresponding DOM element has a `data-atom-id` attribute)
-  id: string | undefined = undefined;
+  // (the corresponding DOM element has a matching `id` attribute)
+  id?: string;
 
-  type: AtomType;
+  type: AtomType | undefined;
 
   // LaTeX command ('\sin') or character ('a')
   command: string;
+  args: T; // (optional)
 
   // Verbatim LaTeX of the command and its arguments
-  // Note that the empty string is a valid verbatim LaTeX , so it's important
+  // Note that the empty string is a valid verbatim LaTeX, so it's important
   // to distinguish between `verbatimLatex === undefined` and `typeof verbatimLatex === 'string'`
-  verbatimLatex: string | undefined = undefined;
 
-  style: PrivateStyle;
+  verbatimLatex: string | undefined;
+
   mode: ParseMode;
-
-  // If true, some structural changes have been made to the atom
-  // (insertion or removal of children) or one of its children is dirty
-  /** @internal */
-  private _isDirty = false;
+  style: PrivateStyle;
 
   // A monotonically increasing counter to detect structural changes
   /** @internal */
-  private _changeCounter = 0;
+  private _changeCounter;
 
   // Cached list of children, invalidated when isDirty = true
   /** @internal */
-  protected _children: Atom[] | undefined;
+  protected _children: Readonly<Atom[]> | undefined;
 
   /** @internal */
   private _branches: Branches;
@@ -194,21 +107,17 @@ export class Atom {
   // - 'adjacent': to the right, above and below the baseline (for example
   // for operators in `textstyle` style)
   // - 'auto': 'over-under' in \displaystyle, 'adjacent' otherwise
-  // If `undefined`, the subsup should be placed on a separate `msubsup` atom.
-  subsupPlacement: 'auto' | 'over-under' | 'adjacent' | undefined = undefined;
+  // If `undefined`, the subsup should be placed on a separate `subsup` atom.
+  subsupPlacement: 'auto' | 'over-under' | 'adjacent' | undefined;
 
   // True if the subsupPlacement was set by `\limits`, `\nolimits` or
   // `\displaylimits`.
   // Necessary so the proper LaTeX can be output.
-  explicitSubsupPlacement = false;
+  explicitSubsupPlacement: boolean;
 
-  // If true, the atom represents a function (which can be followed by parentheses)
-  // e.g. "f" or "\sin"
+  // If true, the atom represents a function (which can be followed by
+  // parentheses) e.g. "f" or "\sin"
   isFunction: boolean;
-
-  // If true, the atom is an operator such as `\int` or `\sum`
-  // (affects layout of supsub)
-  isExtensibleSymbol: boolean;
 
   // If true, when the caret reaches the first position in this element's body,
   // (moving right to left) it automatically moves to the outside of the
@@ -216,11 +125,11 @@ export class Atom {
   // Conversely, when the caret reaches the last position inside
   // this element, (moving left to right) it automatically moves to the one
   // outside the element.
-  skipBoundary = false;
+  skipBoundary: boolean;
 
   // If true, the children of this atom cannot be selected and should be handled
   // as a unit. Used by the `\enclose` annotations, for example.
-  captureSelection = false;
+  captureSelection: boolean;
 
   // If true, this atom should be highlighted when it contains the caret
   displayContainsHighlight: boolean;
@@ -238,40 +147,27 @@ export class Atom {
   // If the atom or one of its descendant includes the caret
   // (used to highlight surd or fences to make clearer where the caret is)
   containsCaret: boolean;
-  caret: ParseMode | '';
+  caret: ParseMode | undefined;
 
-  constructor(
-    type: AtomType,
-    context: GlobalContext,
-    options?: {
-      command?: string;
-      mode?: ParseMode;
-      value?: string;
-      isFunction?: boolean;
-      limits?: 'auto' | 'over-under' | 'adjacent';
-      style?: Style;
-      displayContainsHighlight?: boolean;
-      serialize?: (atom: Atom, options: ToLatexOptions) => string;
-    }
-  ) {
-    this.type = type;
-    this.context = context;
-    if (typeof options?.value === 'string') this.value = options.value;
-    this.command = options?.command ?? this.value ?? '';
-    this.mode = options?.mode ?? 'math';
-    this.isFunction = options?.isFunction ?? false;
-    this.subsupPlacement = options?.limits;
-    this.style = options?.style ?? {};
-    this.displayContainsHighlight = options?.displayContainsHighlight ?? false;
-    if (options?.serialize) {
-      console.assert(typeof options.command === 'string');
-      Atom.customSerializer[options.command!] = options.serialize;
-    }
+  _json: AtomJson | undefined;
+
+  constructor(options: AtomOptions<T>) {
+    this.type = options.type;
+    if (typeof options.value === 'string') this.value = options.value;
+    this.command = options.command ?? this.value ?? '';
+    this.mode = options.mode ?? 'math';
+    if (options.isFunction) this.isFunction = true;
+    if (options.limits) this.subsupPlacement = options.limits;
+    this.style = { ...(options.style ?? {}) };
+    this.displayContainsHighlight = options.displayContainsHighlight ?? false;
+    this.captureSelection = options.captureSelection ?? false;
+    this.skipBoundary = options.skipBoundary ?? false;
+    if (options.verbatimLatex !== undefined && options.verbatimLatex !== null)
+      this.verbatimLatex = options.verbatimLatex;
+    if (options.args) this.args = options.args;
+    if (options.body) this.body = options.body;
+    this._changeCounter = 0;
   }
-
-  private static customSerializer: {
-    [command: string]: (atom: Atom, options: ToLatexOptions) => string;
-  } = {};
 
   /**
    * Return a list of boxes equivalent to atoms.
@@ -280,99 +176,47 @@ export class Atom {
    * a box corresponds to something to draw on screen (a character, a line,
    * etc...).
    *
-   * @param parentContext Font family, variant, size, color, and other info useful
+   * @param context Font family, variant, size, color, and other info useful
    * to render an expression
-   * @param options.newList - If true, for the purpose of calculating spacing
-   * between atoms, this list of atoms should be considered a new atom list,
-   * in the sense of TeX atom lists (i.e. don't consider preceding atoms
-   * to calculate spacing)
    */
   static createBox(
-    parentContext: Context,
-    atoms: Atom[] | undefined,
-    options?: {
-      type?: BoxType;
-      classes?: string;
-      style?: Style;
-      mode?: ParseMode;
-      newList?: boolean;
-    }
+    context: Context,
+    atoms: Readonly<Atom[]> | undefined,
+    options?: { type?: BoxType; classes?: string }
   ): Box | null {
     if (!atoms) return null;
     const runs = getStyleRuns(atoms);
 
-    //
-    // Special case when there's a single run
-    //
-    if (runs.length === 1) {
-      const run = runs[0];
-      if (run[0].style) {
-        return renderStyleRun(parentContext, run, {
-          ...options,
-          style: {
-            color: run[0].style.color,
-            backgroundColor: run[0].style.backgroundColor,
-            fontSize: run[0].style.fontSize,
-          },
-        });
-      }
-      return renderStyleRun(parentContext, run, options);
-    }
-
-    //
-    // There are multiple runs to handle
-    //
     const boxes: Box[] = [];
-    let newList = options?.newList;
     for (const run of runs) {
-      const context = new Context(parentContext, {
-        color: run[0].style?.color,
-        backgroundColor: run[0].style?.backgroundColor,
-        fontSize: run[0].style?.fontSize,
+      const style = run[0].style;
+      const box = renderStyleRun(context, run, {
+        style: {
+          color: style.color,
+          backgroundColor: style.backgroundColor,
+          fontSize: style.fontSize,
+        },
       });
-      const box = renderStyleRun(context, run, { newList });
 
-      if (box) {
-        newList = false;
-        boxes.push(box);
-      }
+      if (box) boxes.push(box);
     }
     if (boxes.length === 0) return null;
-    if (boxes.length === 1 && !options?.classes && !options?.type)
-      return boxes[0].wrap(parentContext);
 
-    return new Box(boxes, {
-      classes: options?.classes,
-      type: options?.type,
-      newList: options?.newList,
-    }).wrap(parentContext);
+    const classes = (options?.classes ?? '').trim();
+    if (boxes.length === 1 && !classes && !options?.type)
+      return boxes[0].wrap(context);
+
+    return new Box(boxes, { classes, type: options?.type }).wrap(context);
   }
 
   /**
    * Given an atom or an array of atoms, return a LaTeX string representation
    */
   static serialize(
-    value: boolean | number | string | Atom | Atom[] | undefined,
+    value: Readonly<Atom[]> | undefined,
     options: ToLatexOptions
   ): string {
-    if (isArray<Atom>(value)) return serializeAtoms(value, options);
-
-    if (typeof value === 'number' || typeof value === 'boolean')
-      return value.toString();
-
-    if (typeof value === 'string') return value.replace(/\s/g, '~');
-
-    if (value === undefined) return '';
-
-    // If we have some verbatim latex for this atom, use it.
-    // This allow non-significant punctuation to be preserved when possible.
-    if (!options.expandMacro && typeof value.verbatimLatex === 'string')
-      return value.verbatimLatex;
-
-    if (value.command && Atom.customSerializer[value.command])
-      return Atom.customSerializer[value.command](value, options);
-
-    return value.serialize(options);
+    return Mode.serialize(value, options);
   }
 
   /**
@@ -404,17 +248,17 @@ export class Atom {
     return undefined;
   }
 
-  static fromJson(json: AtomJson, context: GlobalContext): Atom {
-    const result = new Atom(json.type, context, json as any);
-    // Restore the branches
-    for (const branch of NAMED_BRANCHES)
-      if (json[branch]) result.setChildren(json[branch], branch);
-
-    return result;
+  static fromJson(json: AtomJson): Atom {
+    if (typeof json === 'string')
+      return new Atom({ type: 'mord', value: json, mode: 'math' });
+    return new Atom(json as any);
   }
 
   toJson(): AtomJson {
-    const result: AtomJson = { type: this.type };
+    if (this._json) return this._json;
+    const result: AtomJson = {};
+
+    if (this.type) result.type = this.type;
 
     if (this.mode !== 'math') result.mode = this.mode;
     if (this.command && this.command !== this.value)
@@ -431,110 +275,133 @@ export class Atom {
 
     if (this.isFunction) result.isFunction = true;
     if (this.displayContainsHighlight) result.displayContainsHighlight = true;
-    if (this.isExtensibleSymbol) result.isExtensibleSymbol = true;
     if (this.skipBoundary) result.skipBoundary = true;
     if (this.captureSelection) result.captureSelection = true;
+    if (this.args) result.args = argumentsToJson(this.args);
 
     if (this._branches) {
       for (const branch of Object.keys(this._branches)) {
         if (this._branches[branch]) {
-          result[branch] = this._branches[branch]
-            .filter((x) => x.type !== 'first')
-            .map((x) => x.toJson());
+          result[branch] = this._branches[branch]!.filter(
+            (x) => x.type !== 'first'
+          ).map((x) => x.toJson());
         }
       }
     }
 
+    // If the result is only `{type: "mord", value="b"}`,
+    // return a shortcut
+    if (result.type === 'mord') {
+      if (Object.keys(result).length === 2 && 'value' in result)
+        return result.value;
+    }
+    this._json = result;
     return result;
   }
 
+  // Used to detect changes and send appropriate notifications
   get changeCounter(): number {
+    if (this.parent) return this.parent.changeCounter;
     return this._changeCounter;
   }
 
-  get isDirty(): boolean {
-    return this._isDirty;
-  }
-
   set isDirty(dirty: boolean) {
-    this._isDirty = dirty;
-    if (dirty) {
-      this._changeCounter++;
-      this.verbatimLatex = undefined;
-      this._children = undefined;
+    if (!dirty) return;
 
-      let { parent } = this;
-      while (parent) {
-        parent._isDirty = true;
-        parent._changeCounter++;
-        parent.verbatimLatex = undefined;
-        parent._children = undefined;
+    this._json = undefined;
+    if (!this.parent) this._changeCounter++;
+    if ('verbatimLatex' in this) this.verbatimLatex = undefined;
+    this._children = undefined;
 
-        parent = parent.parent;
-      }
-    }
+    if (this.parent) this.parent.isDirty = true;
   }
 
   /**
-   * Serialize the atom  to LaTeX
+   * Serialize the atom  to LaTeX.
+   * Used internally by Mode: does not serialize styling. To serialize
+   * one or more atoms, use `Atom.serialize()`
    */
-  serialize(options: ToLatexOptions): string {
+  _serialize(options: ToLatexOptions): string {
+    // 1/ Verbatim LaTeX. This allow non-significant punctuation to be
+    // preserved when possible.
+    if (
+      !(
+        options.expandMacro ||
+        options.skipStyles ||
+        options.skipPlaceholders
+      ) &&
+      typeof this.verbatimLatex === 'string'
+    )
+      return this.verbatimLatex;
+
+    // 2/ Custom serializer
+    const def = getDefinition(this.command, this.mode);
+    if (def?.serialize) return def.serialize(this, options);
+
+    // 3/ Command and body
     if (this.body && this.command) {
-      // There's a command and body
       return joinLatex([
-        this.command,
-        '{',
-        this.bodyToLatex(options),
-        '}',
+        latexCommand(this.command, this.bodyToLatex(options)),
         this.supsubToLatex(options),
       ]);
     }
 
+    // 4/ body with no command
     if (this.body) {
-      // There's a body with no command
       return joinLatex([
         this.bodyToLatex(options),
         this.supsubToLatex(options),
       ]);
     }
 
-    if (this.value && this.value !== '\u200B') {
-      // There's probably just a value (which is a unicode character)
-      return this.command ?? unicodeCharToLatex(this.mode, this.value);
-    }
+    // 5/ A string value (which is a unicode character)
+    if (!this.value || this.value === '\u200B') return '';
 
-    return '';
+    return this.command;
   }
 
   bodyToLatex(options: ToLatexOptions): string {
-    return serializeAtoms(this.body, options);
+    let defaultMode =
+      options.defaultMode ?? (this.mode === 'math' ? 'math' : 'text');
+
+    return Mode.serialize(this.body, { ...options, defaultMode });
   }
 
   aboveToLatex(options: ToLatexOptions): string {
-    return serializeAtoms(this.above, options);
+    return Mode.serialize(this.above, options);
   }
 
   belowToLatex(options: ToLatexOptions): string {
-    return serializeAtoms(this.below, options);
+    return Mode.serialize(this.below, options);
   }
 
   supsubToLatex(options: ToLatexOptions): string {
     let result = '';
 
+    // Super/subscript are always in math mode
+    options = { ...options, defaultMode: 'math' };
+
     if (this.branch('subscript') !== undefined) {
-      const sub = serializeAtoms(this.subscript, options);
+      const sub = Mode.serialize(this.subscript, options);
       if (sub.length === 0) result += '_{}';
-      else if (sub.length === 1) result += '_' + sub;
-      else result += `_{${sub}}`;
+      else if (sub.length === 1) {
+        // Using the short form without braces is a stylistic choice
+        // In general, LaTeX recommends the use of braces
+        if (/^[0-9]$/.test(sub)) result += `_${sub}`;
+        else result += `_{${sub}}`;
+      } else result += `_{${sub}}`;
     }
 
     if (this.branch('superscript') !== undefined) {
-      const sup = serializeAtoms(this.superscript, options);
+      const sup = Mode.serialize(this.superscript, options);
       if (sup.length === 0) result += '^{}';
       else if (sup.length === 1) {
         if (sup === '\u2032') result += '^\\prime ';
         else if (sup === '\u2033') result += '^\\doubleprime ';
-        else result += '^' + sup;
+        // Using the short form without braces is a stylistic choice
+        // In general, LaTeX recommends the use of braces
+        else if (/^[0-9]$/.test(sup)) result += `^${sup}`;
+        else result += `^{${sup}}`;
       } else result += `^{${sup}}`;
     }
     return result;
@@ -552,23 +419,30 @@ export class Atom {
   }
 
   get inCaptureSelection(): boolean {
-    let result = false;
     // eslint-disable-next-line @typescript-eslint/no-this-alias
     let atom: Atom | undefined = this;
     while (atom) {
-      if (atom.captureSelection) {
-        result = true;
-        break;
-      }
+      if (atom.captureSelection) return true;
       atom = atom.parent;
     }
-    return result;
+    return false;
+  }
+
+  /** Return the parent editable prompt, if it exists */
+  get parentPrompt(): Atom | null {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    let atom: Atom | undefined = this.parent;
+    while (atom) {
+      if (atom.type === 'prompt' && !atom.captureSelection) return atom;
+      atom = atom.parent;
+    }
+    return null;
   }
 
   /**
    * Return the atoms in the branch, if it exists, otherwise null
    */
-  branch(name: Branch): Atom[] | undefined {
+  branch(name: Branch): Readonly<Atom[]> | undefined {
     if (!isNamedBranch(name)) return undefined;
     if (!this._branches) return undefined;
     return this._branches[name];
@@ -578,9 +452,9 @@ export class Atom {
    * Return all the branches that exist.
    * Some of them may be empty.
    */
-  get branches(): Branch[] {
+  get branches(): Readonly<Branch[]> {
     if (!this._branches) return [];
-    const result: Branch[] = [];
+    const result: BranchName[] = [];
     for (const branch of NAMED_BRANCHES)
       if (this._branches[branch]) result.push(branch);
 
@@ -588,7 +462,10 @@ export class Atom {
   }
 
   /**
-   * Return the atoms in the branch, if it exists, otherwise create it
+   * Return the atoms in the branch, if it exists, otherwise create it.
+   *
+   * Return mutable array of atoms in the branch, since isDirty is
+   * set to true
    */
   createBranch(name: Branch): Atom[] {
     console.assert(isNamedBranch(name));
@@ -605,71 +482,53 @@ export class Atom {
   }
 
   get row(): number {
-    if (!isCellBranch(this.treeBranch)) return -1;
-    return this.treeBranch[0];
+    if (!isCellBranch(this.parentBranch)) return -1;
+    return this.parentBranch[0];
   }
 
   get col(): number {
-    if (!isCellBranch(this.treeBranch)) return -1;
-    return this.treeBranch[1];
+    if (!isCellBranch(this.parentBranch)) return -1;
+    return this.parentBranch[1];
   }
 
-  get body(): Atom[] | undefined {
+  get body(): Readonly<Atom[]> | undefined {
     return this._branches?.body;
   }
 
-  set body(atoms: Atom[] | undefined) {
+  set body(atoms: Readonly<Atom[]> | undefined) {
     this.setChildren(atoms, 'body');
   }
 
-  get superscript(): Atom[] | undefined {
+  get superscript(): Readonly<Atom[]> | undefined {
     return this._branches?.superscript;
   }
 
-  set superscript(atoms: Atom[] | undefined) {
+  set superscript(atoms: Readonly<Atom[]> | undefined) {
     this.setChildren(atoms, 'superscript');
   }
 
-  get subscript(): Atom[] | undefined {
+  get subscript(): Readonly<Atom[]> | undefined {
     return this._branches?.subscript;
   }
 
-  set subscript(atoms: Atom[] | undefined) {
+  set subscript(atoms: Readonly<Atom[]> | undefined) {
     this.setChildren(atoms, 'subscript');
   }
 
-  get above(): Atom[] | undefined {
+  get above(): Readonly<Atom[]> | undefined {
     return this._branches?.above;
   }
 
-  set above(atoms: Atom[] | undefined) {
+  set above(atoms: Readonly<Atom[]> | undefined) {
     this.setChildren(atoms, 'above');
   }
 
-  get below(): Atom[] | undefined {
+  get below(): Readonly<Atom[]> | undefined {
     return this._branches?.below;
   }
 
-  set below(atoms: Atom[] | undefined) {
+  set below(atoms: Readonly<Atom[]> | undefined) {
     this.setChildren(atoms, 'below');
-  }
-
-  get computedStyle(): PrivateStyle {
-    if (!this.parent) return { ...(this.style ?? {}) };
-
-    const hadVerbatimColor = this.style.verbatimColor !== undefined;
-    const hadVerbatimBackgroundColor =
-      this.style.verbatimBackgroundColor !== undefined;
-
-    const result = { ...this.parent.computedStyle, ...this.style };
-
-    // Variant are not included in the computed style (they're not inherited)
-    delete result.variant;
-    delete result.variantStyle;
-
-    if (!hadVerbatimBackgroundColor) delete result.verbatimBackgroundColor;
-    if (!hadVerbatimColor) delete result.verbatimColor;
-    return result;
   }
 
   applyStyle(style: Style): void {
@@ -698,25 +557,29 @@ export class Atom {
   }
 
   getInitialBaseElement(): Atom {
-    let result: Atom | undefined = undefined;
-    if (!this.hasEmptyBranch('body')) {
-      console.assert(this.body?.[0].type === 'first');
-      result = this.body![1].getInitialBaseElement();
-    }
+    if (this.hasEmptyBranch('body')) return this;
 
-    return result ?? this;
+    console.assert(this.body?.[0].type === 'first');
+
+    return this.body![1]?.getInitialBaseElement() ?? this;
   }
 
   getFinalBaseElement(): Atom {
-    if (!this.hasEmptyBranch('body'))
-      return this.body![this.body!.length - 1].getFinalBaseElement();
-
-    return this;
+    if (this.hasEmptyBranch('body')) return this;
+    return this.body![this.body!.length - 1].getFinalBaseElement();
   }
 
   isCharacterBox(): boolean {
-    const base = this.getInitialBaseElement();
-    return /mord/.test(base.type);
+    if (
+      this.type === 'leftright' ||
+      this.type === 'genfrac' ||
+      this.type === 'subsup' ||
+      this.type === 'delim' ||
+      this.type === 'array' ||
+      this.type === 'surd'
+    )
+      return false;
+    return this.getFinalBaseElement().type === 'mord';
   }
 
   hasEmptyBranch(branch: Branch): boolean {
@@ -733,30 +596,32 @@ export class Atom {
    * The children should *not* start with a `"first"` atom:
    * the `first` atom will be added if necessary
    */
-  setChildren(children: Atom[] | undefined, branch: Branch): void {
+  setChildren(children: Readonly<Atom[]> | undefined, branch: Branch): void {
     if (!children) return;
     console.assert(isNamedBranch(branch));
     if (!isNamedBranch(branch)) return;
-    console.assert(children[0]?.type !== 'first');
 
     // Update the parent
-    const newBranch = [this.makeFirstAtom(branch), ...children];
+    const newBranch =
+      children[0]?.type === 'first'
+        ? [...children]
+        : [this.makeFirstAtom(branch), ...children];
     if (this._branches) this._branches[branch] = newBranch;
     else this._branches = { [branch]: newBranch };
 
     // Update the children
     for (const child of children) {
       child.parent = this;
-      child.treeBranch = branch;
+      child.parentBranch = branch;
     }
 
     this.isDirty = true;
   }
 
   makeFirstAtom(branch: Branch): Atom {
-    const result = new Atom('first', this.context, { mode: this.mode });
+    const result = new Atom({ type: 'first', mode: this.mode });
     result.parent = this;
-    result.treeBranch = branch;
+    result.parentBranch = branch;
     return result;
   }
 
@@ -768,54 +633,62 @@ export class Atom {
 
     // Update the child
     child.parent = this;
-    child.treeBranch = branch;
+    child.parentBranch = branch;
   }
 
   addChildBefore(child: Atom, before: Atom): void {
-    console.assert(before.treeBranch !== undefined);
-    const branch = this.createBranch(before.treeBranch!);
+    console.assert(before.parentBranch !== undefined);
+    const branch = this.createBranch(before.parentBranch!);
     branch.splice(branch.indexOf(before), 0, child);
     this.isDirty = true;
 
     // Update the child
     child.parent = this;
-    child.treeBranch = before.treeBranch;
+    child.parentBranch = before.parentBranch;
   }
 
   addChildAfter(child: Atom, after: Atom): void {
-    console.assert(after.treeBranch !== undefined);
-    const branch = this.createBranch(after.treeBranch!);
+    console.assert(after.parentBranch !== undefined);
+    const branch = this.createBranch(after.parentBranch!);
     branch.splice(branch.indexOf(after) + 1, 0, child);
     this.isDirty = true;
 
     // Update the child
     child.parent = this;
-    child.treeBranch = after.treeBranch;
+    child.parentBranch = after.parentBranch;
   }
 
-  addChildren(children: Atom[], branch: Branch): void {
-    for (const child of children) this.addChild(child, branch);
+  addChildren(children: Readonly<Atom[]>, branchName: Branch): void {
+    const branch = this.createBranch(branchName);
+
+    for (const child of children) {
+      child.parent = this;
+      child.parentBranch = branchName;
+      branch.push(child);
+    }
+
+    this.isDirty = true;
   }
 
   /**
    * Return the last atom that was added
    */
-  addChildrenAfter(children: Atom[], after: Atom): Atom {
+  addChildrenAfter(children: Readonly<Atom[]>, after: Atom): Atom {
     console.assert(children.length === 0 || children[0].type !== 'first');
-    console.assert(after.treeBranch !== undefined);
-    const branch = this.createBranch(after.treeBranch!);
+    console.assert(after.parentBranch !== undefined);
+    const branch = this.createBranch(after.parentBranch!);
     branch.splice(branch.indexOf(after) + 1, 0, ...children);
     this.isDirty = true;
 
     // Update the children
     for (const child of children) {
       child.parent = this;
-      child.treeBranch = after.treeBranch;
+      child.parentBranch = after.parentBranch;
     }
     return children[children.length - 1];
   }
 
-  removeBranch(name: Branch): Atom[] {
+  removeBranch(name: Branch): Readonly<Atom[]> {
     const children = this.branch(name);
     if (isNamedBranch(name)) this._branches[name] = undefined;
 
@@ -823,13 +696,13 @@ export class Atom {
 
     for (const child of children) {
       child.parent = undefined;
-      child.treeBranch = undefined;
+      child.parentBranch = undefined;
     }
     // Drop the 'first' element
     console.assert(children[0].type === 'first');
-    children.shift();
+    const [_first, ...rest] = children;
     this.isDirty = true;
-    return children;
+    return rest;
   }
 
   removeChild(child: Atom): void {
@@ -839,7 +712,7 @@ export class Atom {
     if (child.type === 'first') return;
 
     // Update the parent
-    const branch = this.branch(child.treeBranch!)!;
+    const branch: Atom[] = this.branch(child.parentBranch!) as Atom[];
     const index = branch.indexOf(child);
     console.assert(index >= 0);
     branch.splice(index, 1);
@@ -847,12 +720,12 @@ export class Atom {
 
     // Update the child
     child.parent = undefined;
-    child.treeBranch = undefined;
+    child.parentBranch = undefined;
   }
 
-  get siblings(): Atom[] {
-    if (this.type === 'root') return [];
-    return this.parent!.branch(this.treeBranch!)!;
+  get siblings(): Readonly<Atom[]> {
+    if (!this.parent) return [];
+    return this.parent.branch(this.parentBranch!)!;
   }
 
   get firstSibling(): Atom {
@@ -880,13 +753,13 @@ export class Atom {
 
   get leftSibling(): Atom {
     console.assert(this.parent !== undefined);
-    const siblings = this.parent!.branch(this.treeBranch!)!;
+    const siblings = this.parent!.branch(this.parentBranch!)!;
     return siblings[siblings.indexOf(this) - 1];
   }
 
   get rightSibling(): Atom {
     console.assert(this.parent !== undefined);
-    const siblings = this.parent!.branch(this.treeBranch!)!;
+    const siblings = this.parent!.branch(this.parentBranch!)!;
     return siblings[siblings.indexOf(this) + 1];
   }
 
@@ -911,7 +784,7 @@ export class Atom {
    * The order of the atoms is the order in which they
    * are navigated using the keyboard.
    */
-  get children(): Atom[] {
+  get children(): Readonly<Atom[]> {
     if (this._children) return this._children;
     if (!this._branches) return [];
     const result: Atom[] = [];
@@ -929,25 +802,24 @@ export class Atom {
   }
 
   /**
-   * Render this atom as an array of boxes.
+   * Render this atom as a box.
    *
    * The parent context (color, size...) will be applied
    * to the result.
    *
    */
-  render(parentContext: Context, options?: { newList: boolean }): Box | null {
+  render(parentContext: Context): Box | null {
     if (this.type === 'first' && !parentContext.atomIdsSettings) return null;
+
+    const def = getDefinition(this.command, this.mode);
+    if (def?.render) return def.render(this, parentContext);
 
     //
     // 1. Render the body or value
     //
-    const context = new Context(parentContext, this.style);
-    let classes = '';
-    if (this.type === 'root') classes += ' ML__base';
-    if (this.isSelected) classes += ' ML__selected';
-    let result: Box = this.createBox(context, {
-      classes,
-      newList: options?.newList === true || this.type === 'first',
+    const context = new Context({ parent: parentContext }, this.style);
+    let result = this.createBox(context, {
+      classes: !this.parent ? 'ML__base' : '',
     });
     if (!result) return null;
 
@@ -985,8 +857,11 @@ export class Atom {
 
     let supShift = 0;
     if (superscript) {
-      const context = new Context(parentContext, undefined, 'superscript');
-      supBox = Atom.createBox(context, superscript, { newList: true });
+      const context = new Context({
+        parent: parentContext,
+        mathstyle: 'superscript',
+      });
+      supBox = Atom.createBox(context, superscript);
       if (!isCharacterBox) {
         supShift =
           base.height - parentContext.metrics.supDrop * context.scalingFactor;
@@ -995,8 +870,11 @@ export class Atom {
 
     let subShift = 0;
     if (subscript) {
-      const context = new Context(parentContext, undefined, 'subscript');
-      subBox = Atom.createBox(context, subscript, { newList: true });
+      const context = new Context({
+        parent: parentContext,
+        mathstyle: 'subscript',
+      });
+      subBox = Atom.createBox(context, subscript);
       if (!isCharacterBox) {
         subShift =
           base.depth + parentContext.metrics.subDrop * context.scalingFactor;
@@ -1040,7 +918,8 @@ export class Atom {
       // Subscripts shouldn't be shifted by the nucleus' italic correction.
       // Account for that by shifting the subscript back the appropriate
       // amount. Note we only do this when the nucleus is a single symbol.
-      const slant = this.isExtensibleSymbol && base.italic ? -base.italic : 0;
+      const slant =
+        this.type === 'extensible-symbol' && base.italic ? -base.italic : 0;
       supsub = new VBox({
         individualShift: [
           { box: subBox, shift: subShift, marginLeft: slant },
@@ -1061,7 +940,7 @@ export class Atom {
           {
             box: subBox,
             marginRight: scriptspace,
-            marginLeft: this.isCharacterBox() ? -(base.italic ?? 0) : 0,
+            marginLeft: this.isCharacterBox() ? -base.italic : 0,
           },
         ],
       });
@@ -1077,22 +956,26 @@ export class Atom {
         shift: -supShift,
         children: [{ box: supBox, marginRight: scriptspace }],
       });
-
-      supsub.wrap(parentContext);
     }
 
     // Display the caret *following* the superscript and subscript,
-    // so attach the caret to the 'msubsup' element.
-    const supsubContainer = new Box(supsub, {
-      classes: 'msubsup' + (this.isSelected ? ' ML__selected' : ''),
-    });
-    if (this.caret) supsubContainer.caret = this.caret;
+    // so attach the caret to the 'subsup' element.
 
-    return new Box([base, supsubContainer], { type: options.type });
+    return new Box(
+      [
+        base,
+        new Box(supsub, {
+          caret: this.caret,
+          isSelected: this.isSelected,
+          classes: 'ML__msubsup',
+        }),
+      ],
+      { type: options.type }
+    );
   }
 
   attachLimits(
-    parentContext: Context,
+    ctx: Context,
     options: {
       base: Box;
       baseShift?: number;
@@ -1102,27 +985,20 @@ export class Atom {
   ): Box {
     const above = this.superscript
       ? Atom.createBox(
-          new Context(parentContext, this.style, 'superscript'),
-          this.superscript,
-          { newList: true }
+          new Context({ parent: ctx, mathstyle: 'superscript' }, this.style),
+          this.superscript
         )
       : null;
     const below = this.subscript
       ? Atom.createBox(
-          new Context(parentContext, this.style, 'subscript'),
-          this.subscript,
-          { newList: true }
+          new Context({ parent: ctx, mathstyle: 'subscript' }, this.style),
+          this.subscript
         )
       : null;
 
-    if (!above && !below) return options.base.wrap(parentContext);
+    if (!above && !below) return options.base.wrap(ctx);
 
-    return makeLimitsStack(parentContext, {
-      ...options,
-      above,
-      below,
-      type: options?.type ?? 'mop',
-    });
+    return makeLimitsStack(ctx, { ...options, above, below });
   }
 
   /**
@@ -1149,78 +1025,14 @@ export class Atom {
   /**
    * Create a box with the specified body.
    */
-  createMathfieldBox(
-    context: Context,
-    options: {
-      classes?: string;
-      newList?: boolean;
-      placeholderId: string;
-      element: MathfieldElement;
-    }
-  ): MathfieldBox {
-    // Ensure that the atom type is a valid Box type
-    const type: BoxType = 'mathfield';
-
-    // The font family is determined by:
-    // - the base font family associated with this atom (optional). For example,
-    // some atoms such as some functions ('\sin', '\cos', etc...) or some
-    // symbols ('\Z') have an explicit font family. This overrides any
-    // other font family
-    // - the user-specified font family that has been explicitly applied to
-    // this atom
-    // - the font family determined automatically in math mode, for example
-    // which italicizes some characters, but which can be overridden
-
-    const classes = options?.classes ?? '';
-    const result = new MathfieldBox(options.placeholderId, options.element, {
-      type,
-      mode: this.mode,
-      maxFontSize: context.scalingFactor,
-      style: {
-        variant: 'normal', // Will auto-italicize
-        ...this.style,
-        letterShapeStyle: context.letterShapeStyle,
-        fontSize: Math.max(
-          1,
-          context.size + context.mathstyle.sizeDelta
-        ) as FontSize,
-      },
-      classes,
-      newList: options?.newList,
-    });
-
-    // Set other attributes
-    if (context.isTight) result.isTight = true;
-
-    // The italic correction applies only in math mode
-    if (this.mode !== 'math' || this.style.variant === 'main')
-      result.italic = 0;
-
-    result.right = result.italic;
-
-    // To retrieve the atom from a box, for example when the box is clicked
-    // on, attach a unique ID to the box and associate it with the atom.
-    this.bind(context, result);
-
-    return result;
-  }
-
-  /**
-   * Create a box with the specified body.
-   */
   createBox(
     context: Context,
-    options?: {
-      classes?: string;
-      newList?: boolean;
-    }
+    options?: { classes?: string; boxType?: BoxType }
   ): Box {
     const value = this.value ?? this.body;
 
-    // Ensure that the atom type is a valid Box type
-    const type: BoxType | undefined = isBoxType(this.type)
-      ? this.type
-      : undefined;
+    // Get the right BoxType for this atom type
+    const type = options?.boxType ?? boxType(this.type);
 
     // The font family is determined by:
     // - the base font family associated with this atom (optional). For example,
@@ -1240,27 +1052,21 @@ export class Atom {
       typeof value === 'string' || value === undefined
         ? new Box((value as string | undefined) ?? null, {
             type,
+            isSelected: this.isSelected,
             mode: this.mode,
             maxFontSize: context.scalingFactor,
             style: {
               variant: 'normal', // Will auto-italicize
               ...this.style,
-              letterShapeStyle: context.letterShapeStyle,
               fontSize: Math.max(
                 1,
                 context.size + context.mathstyle.sizeDelta
               ) as FontSize,
             },
+            letterShapeStyle: context.letterShapeStyle,
             classes,
-            newList: options?.newList,
           })
-        : Atom.createBox(context, value, {
-            type,
-            mode: this.mode,
-            style: this.style,
-            classes,
-            newList: options?.newList,
-          }) ?? new Box(null);
+        : Atom.createBox(context, value, { type, classes }) ?? new Box(null);
 
     // Set other attributes
     if (context.isTight) result.isTight = true;
@@ -1276,7 +1082,7 @@ export class Atom {
     this.bind(context, result);
     if (this.caret) {
       // If this has a super/subscript, the caret will be attached
-      // to the 'msubsup' atom, so no need to have it here.
+      // to the 'subsup' atom, so no need to have it here.
       if (!this.superscript && !this.subscript) result.caret = this.caret;
     }
 
@@ -1285,14 +1091,14 @@ export class Atom {
 
   /** Return true if a digit, or a decimal point, or a french decimal `{,}` */
   isDigit(): boolean {
-    if (this.type === 'mord' && this.value) return /^[\d,.]$/.test(this.value);
+    if (this.type === 'mord' && this.value) return /^[\d,\.]$/.test(this.value);
     if (this.type === 'group' && this.body?.length === 2)
       return this.body![0].type === 'first' && this.body![1].value === ',';
 
     return false;
   }
   asDigit(): string {
-    if (this.type === 'mord' && this.value && /^[\d,.]$/.test(this.value))
+    if (this.type === 'mord' && this.value && /^[\d,\.]$/.test(this.value))
       return this.value;
 
     if (this.type === 'group' && this.body?.length === 2) {
@@ -1303,45 +1109,15 @@ export class Atom {
   }
 }
 
-/**
- *
- * @param atoms the list of atoms to emit as LaTeX
- * @param options.expandMacro true if macros should be expanded
- * @result a LaTeX string
- */
-function serializeAtoms(
-  atoms: undefined | Atom[],
-  options: ToLatexOptions
-): string {
-  if (!atoms || atoms.length === 0) return '';
-
-  if (atoms[0].type === 'first') {
-    if (atoms.length === 1) return '';
-    // Remove the 'first' atom, if present
-    atoms = atoms.slice(1);
-  }
-
-  if (atoms.length === 0) return '';
-
-  return joinLatex(
-    getPropertyRuns(atoms, 'cssClass').map((x) =>
-      joinLatex(
-        getPropertyRuns(x, 'color').map((x) =>
-          joinLatex(getModeRuns(x).map((x) => Mode.serialize(x, options)))
-        )
-      )
-    )
-  );
-}
-
-function getStyleRuns(atoms: Atom[]): Atom[][] {
+function getStyleRuns(atoms: Readonly<Atom[]>): Readonly<Atom[]>[] {
   let style: Style | undefined = undefined;
   const runs: Atom[][] = [];
   let run: Atom[] = [];
   for (const atom of atoms) {
+    if (atom.type === 'first') run.push(atom);
     if (!style && !atom.style) run.push(atom);
     else {
-      const atomStyle = atom.computedStyle;
+      const atomStyle = atom.style;
       if (
         style &&
         atomStyle.color === style.color &&
@@ -1369,34 +1145,27 @@ function getStyleRuns(atoms: Atom[]): Atom[][] {
  */
 function renderStyleRun(
   parentContext: Context,
-  atoms: Atom[] | undefined,
-  options?: {
-    type?: BoxType;
-    classes?: string;
-    style?: Style;
+  atoms: Readonly<Atom[]> | undefined,
+  options: {
     mode?: ParseMode;
-    newList?: boolean;
+    type?: BoxType;
+    style?: Style;
+    classes?: string;
   }
 ): Box | null {
-  function isText(atom: Atom): boolean {
-    return atom.mode === 'text';
-  }
-
   if (!atoms || atoms.length === 0) return null;
 
-  const context = new Context(parentContext, options?.style);
+  const context = new Context({ parent: parentContext }, options.style);
 
   // In most cases we want to display selection,
   // except if the `atomIdsSettings.groupNumbers` flag is set which is used for
   // read aloud.
-  const displaySelection =
-    !context.atomIdsSettings || !context.atomIdsSettings.groupNumbers;
+  const displaySelection = !context.atomIdsSettings?.groupNumbers;
 
   let boxes: Box[] = [];
-  let newList = options?.newList ?? false;
   if (atoms.length === 1) {
     const atom = atoms[0];
-    const box = atom.render(context, { newList });
+    const box = atom.render(context);
     if (box) {
       if (displaySelection && atom.isSelected) box.selected(true);
       boxes = [box];
@@ -1412,16 +1181,12 @@ function renderStyleRun(
       )
         context.atomIdsSettings.overrideID = digitOrTextStringID;
 
-      const box = atom.render(context, { newList });
+      const box = atom.render(context);
 
       if (context.atomIdsSettings)
         context.atomIdsSettings.overrideID = undefined;
 
       if (box) {
-        // Groups (i.e. `{}`) without a specific boxType restart a new list
-        // (for spacing purposes)
-        newList = atom.type === 'group' && !atom['boxType'];
-
         // If this is a digit or text run, keep track of it
         if (context.atomIdsSettings?.groupNumbers) {
           if (atom.isDigit() || isText(atom)) {
@@ -1451,15 +1216,26 @@ function renderStyleRun(
 
   if (boxes.length === 0) return null;
 
-  let result: Box;
-  if (options || context.isTight || boxes.length > 1) {
-    result = new Box(boxes, {
-      isTight: context.isTight,
-      ...(options ?? {}),
-    });
-    result.isSelected = boxes.every((x) => x.isSelected);
-  } else result = boxes[0];
+  const result = new Box(boxes, {
+    isTight: context.isTight,
+    ...options,
+    type: options.type ?? 'lift',
+  });
+  result.isSelected = boxes.every((x) => x.isSelected);
+  return result.wrap(context);
+}
 
-  // Apply size correction
-  return result.wrap(context).wrap(parentContext);
+function isText(atom: Atom): boolean {
+  return atom.mode === 'text';
+}
+
+function argumentsToJson<T extends any[]>(args: T): any {
+  return args.map((arg) => {
+    if (arg === null) return '<null>';
+    if (Array.isArray(arg) && arg[0] instanceof Atom)
+      return { atoms: arg.map((x) => x.toJson()) };
+    if (typeof arg === 'object' && 'group' in arg)
+      return { group: arg.group.map((x) => x.toJson()) };
+    return arg;
+  });
 }

@@ -24,129 +24,12 @@
  * - https://github.com/microsoft/vscode/wiki/Keybinding-Issues
  */
 
-import { isBrowser } from '../common/capabilities';
 import { normalizeKeyboardEvent } from './keyboard-layout';
-import { Scrim } from './scrim';
-
-const PRINTABLE_KEYCODE = new Set([
-  'Backquote', // Japanese keyboard: hankaku/zenkaku/kanji key, which is non-printable
-  'Digit0',
-  'Digit1',
-  'Digit2',
-  'Digit3',
-  'Digit4',
-  'Digit5',
-  'Digit6',
-  'Digit7',
-  'Digit8',
-  'Digit9',
-  'Minus',
-  'Equal',
-  'IntlYen', // Japanese Keyboard. Russian keyboard: \/
-
-  'KeyQ', // AZERTY keyboard: labeled 'a'
-  'KeyW', // AZERTY keyboard: labeled 'z'
-  'KeyE',
-  'KeyR',
-  'KeyT',
-  'KeyY', // QWERTZ keyboard: labeled 'z'
-  'KeyU',
-  'KeyI',
-  'KeyO',
-  'KeyP',
-  'BracketLeft',
-  'BracketRight',
-  'Backslash', // May be labeled #~ on UK 102 keyboard
-  'KeyA', // AZERTY keyboard: labeled 'q'
-  'KeyS',
-  'KeyD',
-  'KeyF',
-  'KeyG',
-  'KeyH',
-  'KeyJ',
-  'KeyK',
-  'KeyL',
-  'Semicolon',
-  'Quote',
-  'IntlBackslash', // QWERTZ keyboard '><'
-  'KeyZ', // AZERTY: 'w', QWERTZ: 'y'
-  'KeyX',
-  'KeyC',
-  'KeyV',
-  'KeyB',
-  'KeyN',
-  'KeyM',
-  'Comma',
-  'Period',
-  'Slash',
-  'IntlRo', // Japanse keyboard '\ろ'
-
-  'Space',
-
-  'Numpad0',
-  'Numpad1',
-  'Numpad2',
-  'Numpad3',
-  'Numpad4',
-  'Numpad5',
-  'Numpad6',
-  'Numpad7',
-  'Numpad8',
-  'Numpad9',
-  'NumpadAdd',
-  'NumpadComma',
-  'NumpadDecimal',
-  'NumpadDivide',
-  'NumpadEqual',
-  'NumpadHash',
-  'NumpadMultiply',
-  'NumpadParenLeft',
-  'NumpadParenRight',
-  'NumpadStar',
-  'NumpadSubstract',
-]);
-
-export function mightProducePrintableCharacter(evt: KeyboardEvent): boolean {
-  if (evt.ctrlKey || evt.metaKey) {
-    // ignore ctrl/cmd-combination but not shift/alt-combinations
-    return false;
-  }
-
-  // https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/key/Key_Values
-  if (evt.key === 'Dead') return false;
-
-  // When issued via a composition, the `code` field is empty
-  if (evt.code === '') return true;
-
-  return PRINTABLE_KEYCODE.has(evt.code);
-}
-
-/**
- * Create a normalized representation of a keyboard event,
- * i.e., key code and modifier keys. For example:
- * - `ctrl+Shift+alt+[KeyF]`
- *
- * Note: the key code corresponds to a physical key, e.g. 'KeyQ' is
- * the key labeled 'A' on a French keyboard
- *
- */
-function keyboardEventToString(evt: KeyboardEvent): string {
-  evt = normalizeKeyboardEvent(evt);
-
-  const modifiers: string[] = [];
-
-  if (evt.ctrlKey) modifiers.push('ctrl');
-  if (evt.metaKey) modifiers.push('meta');
-  if (evt.altKey) modifiers.push('alt');
-  if (evt.shiftKey) modifiers.push('shift');
-
-  // If no modifiers, simply return the key name
-  if (modifiers.length === 0) return '[' + evt.code + ']';
-
-  modifiers.push('[' + evt.code + ']');
-
-  return modifiers.join('+');
-}
+import { Scrim } from '../ui/utils/scrim';
+import {
+  deepActiveElement,
+  mightProducePrintableCharacter,
+} from '../ui/events/utils';
 
 export interface KeyboardDelegate {
   cancelComposition: () => void;
@@ -156,6 +39,20 @@ export interface KeyboardDelegate {
   setValue: (value: string) => void;
   setAriaLabel: (value: string) => void;
   moveTo: (x: number, y: number) => void;
+  dispose: () => void;
+}
+
+export interface KeyboardDelegateInterface {
+  onKeystroke: (ev: KeyboardEvent) => boolean;
+  onInput: (text: string) => void;
+  onCut: (ev: ClipboardEvent) => void;
+  onCopy: (ev: ClipboardEvent) => void;
+  onPaste: (ev: ClipboardEvent) => boolean;
+  onFocus: () => void;
+  onBlur: () => void;
+  onCompositionStart: (composition: string) => void;
+  onCompositionUpdate: (composition: string) => void;
+  onCompositionEnd: (composition: string) => void;
 }
 
 /**
@@ -166,10 +63,9 @@ export interface KeyboardDelegate {
  * in the `keystroke()` handler while text input should be handled in
  * `typedtext()`.
  *
- * @param {HTMLElement} textarea A `TextArea` element that will capture the keyboard
- * events. While this element will usually be a `TextArea`, it could be any
- * element that is focusable and can receive keyboard events.
- * @param {Object.<string, any>} handlers
+ * @param {HTMLElement} keyboardSink The element that captures the keyboard
+ * events.
+ * @param {KeyboardDelegateInterface} delegate
  * @param {function} handlers.keystroke invoked on a key down event, including
  * for special keys such as ESC, arrow keys, tab, etc... and their variants
  * with modifiers.
@@ -180,23 +76,12 @@ export interface KeyboardDelegate {
  * When a 'character' key is pressed, both `keystroke()` and `typedtext()` will
  * be invoked. When a control/function key is pressed, only `keystroke()` will
  * be invoked. In some cases, for example when using input methods or entering
- * emoji, only `typedtext()` will be invoked.
+ * emoji, only `onInput()` will be invoked.
  */
 export function delegateKeyboardEvents(
-  textarea: HTMLTextAreaElement,
+  keyboardSink: HTMLElement,
   element: HTMLElement,
-  handlers: {
-    typedText: (text: string) => void;
-    cut: (ev: ClipboardEvent) => void;
-    copy: (ev: ClipboardEvent) => void;
-    paste: (ev: ClipboardEvent) => boolean;
-    keystroke: (keystroke: string, ev: KeyboardEvent) => boolean;
-    focus: null | (() => void);
-    blur: null | (() => void);
-    compositionStart: (composition: string) => void;
-    compositionUpdate: (composition: string) => void;
-    compositionEnd: (composition: string) => void;
-  }
+  delegate: KeyboardDelegateInterface
 ): KeyboardDelegate {
   let keydownEvent: KeyboardEvent | null = null;
   let keypressEvent: KeyboardEvent | null = null;
@@ -204,31 +89,10 @@ export function delegateKeyboardEvents(
   let focusInProgress = false;
   let blurInProgress = false;
 
-  // This callback is invoked after a keyboard event has been processed
-  // by the textarea
-  let callbackTimeoutID;
-  function defer(cb: () => void): void {
-    clearTimeout(callbackTimeoutID);
-    callbackTimeoutID = setTimeout(() => {
-      clearTimeout(callbackTimeoutID);
-      cb();
-    });
-  }
+  const controller = new AbortController();
+  const signal = controller.signal;
 
-  function handleTypedText(): void {
-    // Some browsers (Firefox, Opera) fire a keypress event for commands
-    // such as cmd+C where there might be a non-empty selection.
-    // We need to ignore these.
-    if (textarea.selectionStart !== textarea.selectionEnd) return;
-
-    const text = textarea.value;
-    textarea.value = '';
-    if (text.length > 0) handlers.typedText(text);
-  }
-
-  const target = textarea;
-
-  target.addEventListener(
+  keyboardSink.addEventListener(
     'keydown',
     (event: KeyboardEvent): void => {
       // "Process" key indicates commit of IME session (on Firefox)
@@ -245,71 +109,153 @@ export function delegateKeyboardEvents(
 
       keydownEvent = event;
       keypressEvent = null;
-      if (!handlers.keystroke(keyboardEventToString(event), event)) {
-        keydownEvent = null;
-        textarea.value = '';
-      } else if (textarea.tagName.toLowerCase() !== 'textarea') {
-        // If we did not create a text-area because we're on a mobile
-        // device and we don't want to use the OS virtual keyboard, capture
-        // the key events possibly coming from an attached hardware keyboard
-        if (event.key.length === 1) handlers.typedText(event.key);
-        event.preventDefault();
-      }
+      if (!delegate.onKeystroke(event)) keydownEvent = null;
+      else keyboardSink.textContent = '';
     },
-    true
+    { capture: true, signal }
   );
-  target.addEventListener(
+
+  keyboardSink.addEventListener(
     'keypress',
     (event) => {
       if (compositionInProgress) return;
       // If this is not the first keypress after a keydown, that is,
       // if this is a repeated keystroke, call the keystroke handler.
-      if (keydownEvent && keypressEvent)
-        handlers.keystroke(keyboardEventToString(keydownEvent), keydownEvent);
+      if (keydownEvent && keypressEvent) delegate.onKeystroke(keydownEvent);
 
       keypressEvent = event;
-      defer(handleTypedText);
     },
-    true
+    { capture: true, signal }
   );
-  target.addEventListener(
-    'keyup',
-    () => {
+
+  keyboardSink.addEventListener(
+    'compositionstart',
+    (event: CompositionEvent) => {
+      keyboardSink.textContent = '';
+      compositionInProgress = true;
+
+      delegate.onCompositionStart(event.data);
+    },
+    { capture: true, signal }
+  );
+
+  keyboardSink.addEventListener(
+    'compositionupdate',
+    (ev: CompositionEvent) => {
+      if (!compositionInProgress) return;
+
+      delegate.onCompositionUpdate(ev.data);
+    },
+    { capture: true, signal }
+  );
+
+  keyboardSink.addEventListener(
+    'compositionend',
+    (ev: CompositionEvent) => {
+      keyboardSink.textContent = '';
+      if (!compositionInProgress) return;
+
+      compositionInProgress = false;
+      delegate.onCompositionEnd(ev.data);
+    },
+    { capture: true, signal }
+  );
+
+  keyboardSink.addEventListener(
+    'beforeinput',
+    (ev) => ev.stopImmediatePropagation(),
+    { signal }
+  );
+
+  // The `input` events is dispatched when the field is changed,
+  // but no other relevant events have been triggered
+  // for example with emoji input...
+  keyboardSink.addEventListener(
+    'input',
+    (ev: InputEvent) => {
       if (compositionInProgress) return;
-      // If we've received a keydown, but no keypress, check what's in the
-      // textarea field.
-      if (keydownEvent && !keypressEvent) handleTypedText();
+
+      keyboardSink.textContent = '';
+
+      // If this was an `input` event sent as a result of a commit of
+      // IME, ignore it.
+      // (This is what FireFox does, even though the spec says it
+      // shouldn't happen). See https://github.com/w3c/uievents/issues/202
+      if (ev.inputType === 'insertCompositionText') return;
+
+      // Paste is handled in paste handler
+      if (ev.inputType === 'insertFromPaste') {
+        ev.preventDefault();
+        ev.stopPropagation();
+        return;
+      }
+
+      delegate.onInput(ev.data ?? '');
+
+      // Do not propagate the event (it crosses the shadow dom barrier)
+      ev.preventDefault();
+      ev.stopPropagation();
     },
-    true
+    { signal }
   );
-  target.addEventListener(
+
+  keyboardSink.addEventListener(
     'paste',
     (event: ClipboardEvent) => {
-      // In some cases (Linux browsers), the text area might not be focused
+      // In some cases (Linux browsers), the keyboard sink might not be focused
       // when doing a middle-click paste command.
-      textarea.focus();
-      textarea.value = '';
-      if (!handlers.paste(event)) event.preventDefault();
+      keyboardSink.focus({ preventScroll: true });
+      keyboardSink.textContent = '';
+      if (!delegate.onPaste(event)) event.preventDefault();
       event.stopImmediatePropagation();
     },
-    true
+    { signal }
   );
-  target.addEventListener('cut', (ev) => handlers.cut(ev), true);
-  target.addEventListener('copy', (ev) => handlers.copy(ev), true);
-  target.addEventListener(
+
+  keyboardSink.addEventListener('cut', (ev) => delegate.onCut(ev), {
+    capture: true,
+    signal,
+  });
+
+  keyboardSink.addEventListener('copy', (ev) => delegate.onCopy(ev), {
+    capture: true,
+    signal,
+  });
+
+  keyboardSink.addEventListener(
     'blur',
     (event) => {
       // If we're attempting to focus the mathfield (which can happen on iOS if
       // clicking right on the border of the mathfield) ignore it
       // (preventDefault on the event doesn't work)
       if (event['relatedTarget']?.['_mathfield']?.['element'] === element) {
-        textarea.focus();
+        keyboardSink.focus({ preventScroll: true });
         event.preventDefault();
         event.stopPropagation();
         return;
       }
-      // If the scrim is up, ignore blur (while the alternate key panel is up)
-      const scrimState = Scrim.scrim?.state;
+
+      // If we're attempting to focus an element that is inside the virtual
+      // keyboard, ignore the blur (this happens on iOS when doing a multi-touch
+      // tap on an element inside the virtual keyboard).
+      let isInsideKeyboard = false;
+      let target = event.relatedTarget as HTMLElement;
+      while (target) {
+        if (target.classList.contains('ML__keyboard')) {
+          isInsideKeyboard = true;
+          break;
+        }
+        target = target.parentElement as HTMLElement;
+      }
+      if (isInsideKeyboard) {
+        keyboardSink.focus({ preventScroll: true });
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+
+      // If the scrim is up, ignore blur (while the variants panel is up)
+      const scrimState = Scrim.state;
       if (scrimState === 'open' || scrimState === 'opening') {
         event.preventDefault();
         event.stopPropagation();
@@ -332,143 +278,72 @@ export function delegateKeyboardEvents(
       blurInProgress = true;
       keydownEvent = null;
       keypressEvent = null;
-      if (handlers.blur) handlers.blur();
+      delegate.onBlur();
       blurInProgress = false;
-      event.stopPropagation();
     },
-    true
+    { capture: true, signal }
   );
-  target.addEventListener(
+
+  keyboardSink.addEventListener(
     'focus',
-    (evt) => {
+    (_evt) => {
       if (blurInProgress || focusInProgress) return;
 
       focusInProgress = true;
-      if (handlers.focus) handlers.focus();
-      if (
-        deepActiveElement() === textarea &&
-        typeof textarea.select === 'function'
-      )
-        textarea.select();
+      delegate.onFocus();
 
       focusInProgress = false;
-      evt.stopPropagation();
     },
-    true
+    { capture: true, signal }
   );
-  target.addEventListener(
-    'compositionstart',
-    (event: CompositionEvent) => {
-      compositionInProgress = true;
-      textarea.value = '';
-
-      if (handlers.compositionStart) handlers.compositionStart(event.data);
-    },
-    true
-  );
-  target.addEventListener(
-    'compositionupdate',
-    (ev: CompositionEvent) => {
-      if (!compositionInProgress) return;
-      if (handlers.compositionUpdate) handlers.compositionUpdate(ev.data);
-    },
-    true
-  );
-  target.addEventListener(
-    'compositionend',
-    (ev: CompositionEvent) => {
-      textarea.value = '';
-      if (!compositionInProgress) return;
-      compositionInProgress = false;
-      if (handlers.compositionEnd) handlers.compositionEnd(ev.data);
-    },
-    true
-  );
-
-  target.addEventListener('beforeinput', (ev: InputEvent) => {
-    ev.stopImmediatePropagation();
-  });
-
-  // The `input` handler gets called when the field is changed,
-  // but no other relevant events have been triggered
-  // for example with emoji input...
-  target.addEventListener('input', (ev: InputEvent) => {
-    if (compositionInProgress) return;
-    // If this was an `input` event sent as a result of a commit of
-    // IME, ignore it.
-    // (This is what FireFox does, even though the spec says it shouldn't happen)
-    // See https://github.com/w3c/uievents/issues/202
-    if (ev.inputType === 'insertCompositionText') return;
-
-    // Paste is handled in paste handler
-    if (ev.inputType === 'insertFromPaste') {
-      ev.preventDefault();
-      ev.stopPropagation();
-      return;
-    }
-
-    defer(handleTypedText);
-
-    // Do not propagate the event (it crosses the shadow dom barrier)
-    ev.preventDefault();
-    ev.stopPropagation();
-  });
 
   return {
+    dispose: (): void => controller.abort(),
     cancelComposition: (): void => {
-      const savedBlur = handlers.blur;
-      const savedFocus = handlers.focus;
-      handlers.blur = null;
-      handlers.focus = null;
-      textarea.blur();
-      textarea.focus();
-      handlers.blur = savedBlur;
-      handlers.focus = savedFocus;
+      // Due to the order of event, we may not have
+      // received `compositionstart` by the time we decide
+      // to cancel the composition.
+      if (!compositionInProgress) return;
+      keyboardSink.blur();
+      requestAnimationFrame(() => keyboardSink.focus({ preventScroll: true }));
     },
+
     blur: (): void => {
-      if (typeof textarea.blur === 'function') textarea.blur();
+      if (typeof keyboardSink.blur === 'function') keyboardSink.blur();
     },
+
     focus: (): void => {
-      if (typeof textarea.focus === 'function') textarea.focus();
+      if (!focusInProgress && typeof keyboardSink.focus === 'function')
+        keyboardSink.focus({ preventScroll: true });
     },
+
     hasFocus: (): boolean => {
-      return deepActiveElement() === textarea;
+      return deepActiveElement() === keyboardSink;
     },
+
+    setAriaLabel: (value: string): void =>
+      keyboardSink.setAttribute('aria-label', value),
+
     setValue: (value: string): void => {
-      if (value) {
-        textarea.value = value;
-        // The textarea may be a span (on mobile, for example), so check that
-        // it has a select() before calling it.
-        if (
-          deepActiveElement() === textarea &&
-          typeof textarea.select === 'function'
-        )
-          textarea.select();
-      } else {
-        textarea.value = '';
-        textarea.setAttribute('aria-label', '');
-      }
+      if (keyboardSink.textContent === value) return;
+      keyboardSink.textContent = value;
+      // Move sink offscreen (Safari will display a visible selection otherwise)
+      keyboardSink.style.left = `-1000px`;
+      // Select the elements in the sink (Safari will not enable copy/paste if there isn't a selection)
+      window.getSelection()?.selectAllChildren(keyboardSink);
     },
-    setAriaLabel: (value: string): void => {
-      textarea.setAttribute('aria-label', 'after: ' + value);
-    },
+
     moveTo: (x: number, y: number): void => {
-      textarea.style.top = `${y}px`;
-      textarea.style.left = `${x}px`;
+      // Move the sink on screen, used when composition with an IME is in
+      // progress so its accessory windows appear at the right place
+      keyboardSink.style.top = `${y}px`;
+      keyboardSink.style.left = `${x}px`;
     },
   };
 }
 
-function deepActiveElement(): Element | null {
-  if (!isBrowser()) return null;
-  let a = document.activeElement;
-  while (a?.shadowRoot?.activeElement) a = a.shadowRoot.activeElement;
-
-  return a;
-}
-
-export function eventToChar(evt?: KeyboardEvent): string {
-  if (!evt) return '';
+export function keyboardEventToChar(evt?: KeyboardEvent): string {
+  if (!evt || !mightProducePrintableCharacter(evt)) return '';
   let result: string | undefined;
   if (evt.key === 'Unidentified') {
     // On Android, the evt.key seems to always be 'Unidentified'.
@@ -476,6 +351,9 @@ export function eventToChar(evt?: KeyboardEvent): string {
     if (evt.target) result = (evt.target as HTMLInputElement).value;
   }
 
+  // Note that in some  rare cases, the evt.key can be a string of multiple
+  // char. This happens on Windows Swedish keyboard with Firefox, where the
+  // `¨` key is returned as `¨¨`.
   result = result ?? evt.key ?? evt.code;
   if (
     /^(Dead|Return|Enter|Tab|Escape|Delete|PageUp|PageDown|Home|End|Help|ArrowLeft|ArrowRight|ArrowUp|ArrowDown)$/.test(
@@ -485,4 +363,31 @@ export function eventToChar(evt?: KeyboardEvent): string {
     result = '';
 
   return result;
+}
+
+/**
+ * Create a normalized representation of a keyboard event,
+ * i.e., key code and modifier keys. For example:
+ * - `ctrl+Shift+alt+[KeyF]`
+ *
+ * Note: the key code corresponds to a physical key, e.g. 'KeyQ' is
+ * the key labeled 'A' on a French keyboard
+ *
+ */
+export function keyboardEventToString(evt: KeyboardEvent): string {
+  evt = normalizeKeyboardEvent(evt);
+
+  const modifiers: string[] = [];
+
+  if (evt.ctrlKey) modifiers.push('ctrl');
+  if (evt.metaKey) modifiers.push('meta');
+  if (evt.altKey) modifiers.push('alt');
+  if (evt.shiftKey) modifiers.push('shift');
+
+  // If no modifiers, simply return the key name
+  if (modifiers.length === 0) return `[${evt.code}]`;
+
+  modifiers.push(`[${evt.code}]`);
+
+  return modifiers.join('+');
 }

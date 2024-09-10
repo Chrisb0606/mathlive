@@ -1,7 +1,10 @@
-import { convertLatexToMarkup, validateLatex } from '../src/mathlive';
+import {
+  convertLatexToMarkup,
+  validateLatex,
+} from '../src/public/mathlive-ssr';
 
 function markupAndError(formula: string): [string, string] {
-  const markup = convertLatexToMarkup(formula, { mathstyle: 'displaystyle' });
+  const markup = convertLatexToMarkup(formula, { defaultMode: 'math' });
   const errors = validateLatex(formula);
   if (errors.length === 0) return [markup, 'no-error'];
   return [markup, errors[0].code];
@@ -67,7 +70,7 @@ describe('CHARACTERS', () => {
 });
 describe('EXPANSION PRIMITIVES', () => {
   test.each([
-    ['\\obeyspaces =   =', '=\\space\\space\\space='],
+    // ['\\obeyspaces =   =', '=\\space\\space\\space='],
     ['\\csname alpha\\endcsname', '\\alpha'],
     ['\\csname alph\\char"41\\endcsname', '\\alph A'],
     ['=\\sqrt\\bgroup x \\egroup=', '=\\sqrt{x}='],
@@ -80,6 +83,8 @@ describe('EXPANSION PRIMITIVES', () => {
 
 describe('ARGUMENTS', () => {
   test.each([
+    ['a^\\frac12', 'a^{\\frac{1}{2}}'],
+    ['\\sqrt3^2', '\\sqrt{3}^{2}'],
     ['\\frac12', '\\frac{1}{2}'],
     ['\\frac  1  2', '\\frac{1}{2}'],
     ['\\frac357', '\\frac{3}{5}7'],

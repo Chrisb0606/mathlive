@@ -7,6 +7,7 @@
 /dist
 /declarations
 .rollup.cache/
+temp-docs/
 
 babel.babel
 TODO.md
@@ -27,3 +28,6 @@ ehthumbs.db
 Thumbs.db
 #IDE files
 .idea
+/test-results/
+/playwright-report/
+/playwright/.cache/

@@ -1,13 +1,13 @@
 import { Atom } from '../core/atom';
-import type { ModelPrivate } from './model-private';
+import type { _Model } from './model-private';
 import { Range } from '../public/mathfield';
-import { Style } from '../public/core';
 import { isArray } from '../common/types';
 import { DEFAULT_FONT_SIZE } from '../core/font-metrics';
-import { PrivateStyle } from '../core/context';
+import type { Style, VariantStyle } from '../public/core-types';
+import { PrivateStyle } from '../core/types';
 
 export function applyStyleToUnstyledAtoms(
-  atom: Atom | Atom[] | undefined,
+  atom: Atom | Readonly<Atom[]> | undefined,
   style?: Style
 ): void {
   if (!atom || !style) return;
@@ -44,7 +44,7 @@ export function applyStyleToUnstyledAtoms(
  */
 
 export function applyStyle(
-  model: ModelPrivate,
+  model: _Model,
   range: Range,
   style: PrivateStyle,
   options: { operation: 'set' | 'toggle' }
@@ -67,7 +67,7 @@ export function applyStyle(
     if (style.color && everyStyle('color', style.color)) {
       // If the selection already has this color, turn it off
       style.color = 'none';
-      style.verbatimColor = undefined;
+      delete style.verbatimColor;
     }
 
     if (
@@ -76,7 +76,7 @@ export function applyStyle(
     ) {
       // If the selection already has this color, turn it off
       style.backgroundColor = 'none';
-      style.verbatimBackgroundColor = undefined;
+      delete style.verbatimBackgroundColor;
     }
 
     if (style.fontFamily && everyStyle('fontFamily', style.fontFamily)) {
@@ -101,9 +101,49 @@ export function applyStyle(
       // If the selection already has this size, reset it to default size
       style.fontSize = DEFAULT_FONT_SIZE;
     }
+
+    if (style.variant && everyStyle('variant', style.variant)) {
+      // If the selection already has this variant, turn it off
+      style.variant = 'normal';
+    }
+
+    if (style.variantStyle && everyStyle('variantStyle', style.variantStyle)) {
+      // If the selection already has this variant, turn it off
+      style.variantStyle = '';
+    }
   }
 
   for (const atom of atoms) atom.applyStyle(style);
 
   return true;
+}
+
+export function addItalic(v: VariantStyle | undefined): VariantStyle {
+  return {
+    'up': 'italic',
+    'bold': 'bolditalic',
+    'italic': 'italic',
+    'bolditalic': 'bolditalic',
+    '': 'italic',
+  }[v ?? ''] as VariantStyle;
+}
+
+export function removeItalic(v: VariantStyle | undefined): VariantStyle {
+  return {
+    'up': 'up',
+    'bold': 'bold',
+    'italic': undefined,
+    'bolditalic': 'bold',
+    '': undefined,
+  }[v ?? ''] as VariantStyle;
+}
+
+export function addBold(v: VariantStyle | undefined): VariantStyle {
+  return {
+    'up': 'bold',
+    'bold': 'bold',
+    'italic': 'bolditalic',
+    'bolditalic': 'bolditalic',
+    '': 'bold',
+  }[v ?? ''] as VariantStyle;
 }

@@ -1,12 +1,14 @@
-import type { ModelPrivate } from './model-private';
-import { MathfieldPrivate, getLocalDOMRect } from '../editor/mathfield';
+import type { _Model } from './model-private';
 import { Atom } from '../core/atom-class';
-import { ArrayAtom } from '../core-atoms/array';
-import { LatexAtom } from '../core-atoms/latex';
-import { TextAtom } from '../core-atoms/text';
-import { LETTER_AND_DIGITS } from '../core-definitions/definitions';
+import { ArrayAtom } from '../atoms/array';
+import { LatexAtom } from '../atoms/latex';
+import { TextAtom } from '../atoms/text';
+import { LETTER_AND_DIGITS } from '../latex-commands/definitions-utils';
 import type { Offset, Selection } from '../public/mathfield';
 import { getCommandSuggestionRange } from '../editor-mathfield/mode-editor-latex';
+import { PromptAtom } from '../atoms/prompt';
+import { getLocalDOMRect } from 'editor-mathfield/utils';
+import { _Mathfield } from 'editor-mathfield/mathfield-private';
 
 /*
  * Calculates the offset of the "next word".
@@ -39,7 +41,7 @@ import { getCommandSuggestionRange } from '../editor-mathfield/mode-editor-latex
  *
  */
 export function wordBoundaryOffset(
-  model: ModelPrivate,
+  model: _Model,
   offset: Offset,
   direction: 'forward' | 'backward'
 ): number {
@@ -117,7 +119,7 @@ export function wordBoundaryOffset(
  * @todo array
  */
 export function skip(
-  model: ModelPrivate,
+  model: _Model,
   direction: 'forward' | 'backward',
   options?: { extend: boolean }
 ): boolean {
@@ -127,7 +129,7 @@ export function skip(
 
   let atom = model.at(model.position);
   if (direction === 'forward') {
-    if (atom.type === 'msubsup') {
+    if (atom.type === 'subsup') {
       atom = atom.rightSibling;
       if (!atom) atom = model.at(model.position + 1);
     } else atom = model.at(model.position + 1);
@@ -227,19 +229,19 @@ export function skip(
       }
     } else {
       const type = atom.type;
-      if (atom.type === 'msubsup') {
-        // If we're after a 'msubsup', skip to its left sibling
+      if (atom.type === 'subsup') {
+        // If we're after a 'subsup', skip to its left sibling
         // (the base of the super/subscript)
         offset = model.offsetOf(model.at(offset).leftSibling);
       }
 
       offset -= 1;
       let nextType = model.at(offset)?.type;
-      // If (nextType === 'msubsup') {
+      // If (nextType === 'subsup') {
       //     offset = model.offsetOf(model.at(offset).leftSibling);
       // }
       while (offset >= 0 && nextType === type) {
-        if (model.at(offset)?.type === 'msubsup')
+        if (model.at(offset)?.type === 'subsup')
           offset = model.offsetOf(model.at(offset).leftSibling);
         else offset -= 1;
 
@@ -247,17 +249,17 @@ export function skip(
       }
     }
   } else {
-    const { type } = atom;
-    // If (atom.type === 'msubsup') {
+    const { type: type } = atom;
+    // If (atom.type === 'subsup') {
     //     offset = model.offsetOf(model.at(offset).rightSibling);
     // }
     let nextType = model.at(offset)?.type;
     const { lastOffset } = model;
     while (
       offset <= lastOffset &&
-      (nextType === type || nextType === 'msubsup')
+      (nextType === type || nextType === 'subsup')
     ) {
-      while (model.at(offset).rightSibling?.type === 'msubsup')
+      while (model.at(offset).rightSibling?.type === 'subsup')
         offset = model.offsetOf(model.at(offset).rightSibling);
 
       offset += 1;
@@ -282,6 +284,7 @@ export function skip(
   }
 
   model.announce('move', previousPosition);
+  model.mathfield.stopCoalescingUndo();
   return true;
 }
 
@@ -289,11 +292,13 @@ export function skip(
  * Handle keyboard navigation (arrow keys)
  */
 export function move(
-  model: ModelPrivate,
+  model: _Model,
   direction: 'forward' | 'backward' | 'upward' | 'downward',
   options?: { extend: boolean }
 ): boolean {
   options = options ?? { extend: false };
+
+  model.mathfield.styleBias = direction === 'backward' ? 'right' : 'left';
 
   if (direction !== 'forward') {
     const [from, to] = getCommandSuggestionRange(model);
@@ -303,96 +308,103 @@ export function move(
   if (direction === 'upward') return moveUpward(model, options);
   if (direction === 'downward') return moveDownward(model, options);
 
-  const previousPosition = model.position;
-
-  if (options.extend) return model.extendSelection(direction);
+  if (options.extend) {
+    let pos = nextValidPosition(model, model.position, direction);
+    if (pos < 0) pos = 0;
+    if (pos > model.lastOffset) pos = model.lastOffset;
+    const result = model.setSelection(model.anchor, pos);
+    model.mathfield.stopCoalescingUndo();
+    return result;
+  }
 
   if (model.selectionIsPlaceholder) {
     model.collapseSelection(direction);
-    return move(model, direction);
+    const result = move(model, direction);
+    model.mathfield.stopCoalescingUndo();
+    return result;
   }
 
-  if (!model.collapseSelection(direction)) {
-    let pos = model.position + (direction === 'forward' ? +1 : -1);
-    let atom = model.at(pos);
+  let pos = model.position;
+  const previousPosition = pos;
+  if (model.collapseSelection(direction)) {
+    pos = model.position;
+    if (!isValidPosition(model, pos))
+      pos = nextValidPosition(model, pos, direction);
+  } else pos = nextValidPosition(model, pos, direction);
 
-    //
-    // 1. Handle `captureSelection` and `skipBoundary`
-    //
-    if (pos >= 0 && pos <= model.lastOffset) {
-      if (direction === 'forward') {
-        if (atom.inCaptureSelection) {
-          // If in a capture selection, while going forward jump to
-          // after
-          while (!atom.captureSelection) atom = atom.parent!;
-          pos = model.offsetOf(atom);
-        } else if (
-          !atom.isFirstSibling &&
-          atom.isLastSibling &&
-          atom.parent?.skipBoundary
-        ) {
-          // When going forward if next is skipboundary, move 2
-          if (pos + 1 === model.lastOffset) pos = pos + 1;
-          else {
-            model.position = pos;
-            return move(model, 'forward', options);
-          }
-        } else if (atom instanceof LatexAtom && atom.isSuggestion)
-          atom.isSuggestion = false;
-      } else if (direction === 'backward') {
-        if (atom.parent?.inCaptureSelection) {
-          // If in a capture selection while going backward, jump to
-          // before
-          while (!atom.captureSelection) atom = atom.parent!;
-          pos = Math.max(0, model.offsetOf(atom.leftSibling));
-        } else if (atom.skipBoundary) {
-          // When going backward, if land on first of group and previous (atom) is
-          // skipboundary,  move - 2
-          pos = Math.max(0, model.position - 2);
-        }
-      }
+  if (pos < 0 || pos > model.lastOffset) {
+    // We're going out of bounds
+    let success = true; // True => perform default handling
+    if (!model.silenceNotifications) {
+      success =
+        model.mathfield.host?.dispatchEvent(
+          new CustomEvent('move-out', {
+            detail: { direction },
+            cancelable: true,
+            bubbles: true,
+            composed: true,
+          })
+        ) ?? true;
     }
-
-    //
-    // 2. Handle out of bounds
-    //
-    if (pos < 0 || pos > model.lastOffset) {
-      // We're going out of bounds
-      let result = true; // True => perform default handling
-      if (!model.suppressChangeNotifications) {
-        result =
-          model.mathfield.host?.dispatchEvent(
-            new CustomEvent('move-out', {
-              detail: { direction },
-              cancelable: true,
-              bubbles: true,
-              composed: true,
-            })
-          ) ?? true;
-      }
-      if (result) model.announce('plonk');
-      return result;
-    }
-
-    //
-    // 3. Handle placeholder
-    //
-    model.setPositionHandlingPlaceholder(pos);
+    if (success) model.announce('plonk');
+    return success;
   }
 
+  model.setPositionHandlingPlaceholder(pos);
+  model.mathfield.stopCoalescingUndo();
   model.announce('move', previousPosition);
+
+  return true;
+}
+
+function nextValidPosition(
+  model: _Model,
+  pos: number,
+  direction: 'forward' | 'backward'
+): number {
+  pos = pos + (direction === 'forward' ? +1 : -1);
+
+  if (pos < 0 || pos > model.lastOffset) return pos;
+
+  if (!isValidPosition(model, pos))
+    return nextValidPosition(model, pos, direction);
+
+  return pos;
+}
+
+function isValidPosition(model: _Model, pos: number): boolean {
+  const atom = model.at(pos);
+
+  // If we're inside a captureSelection, that's not a valid position
+  let parent = atom.parent;
+  while (parent && !parent.inCaptureSelection) parent = parent.parent;
+  if (parent?.inCaptureSelection) return false;
+
+  if (atom.parent?.skipBoundary) {
+    if (!atom.isFirstSibling && atom.isLastSibling) return false;
+    if (atom.type === 'first') return false;
+  }
+
+  if (model.mathfield.hasEditablePrompts && !atom.parentPrompt) return false;
+
   return true;
 }
 
 function getClosestAtomToXPosition(
-  mathfield: MathfieldPrivate,
-  search: Atom[],
+  mathfield: _Mathfield,
+  search: Readonly<Atom[]>,
   x: number
 ): Atom {
   let prevX = Infinity;
+
   let i = 0;
   for (; i < search.length; i++) {
-    const toX = getLocalDOMRect(mathfield.getHTMLElement(search[i])).right;
+    const atom = search[i];
+    const el = mathfield.getHTMLElement(atom);
+
+    if (!el) continue;
+
+    const toX = getLocalDOMRect(el).right;
     const abs = Math.abs(x - toX);
 
     if (abs <= prevX) {
@@ -407,17 +419,24 @@ function getClosestAtomToXPosition(
 }
 
 function moveToClosestAtomVertically(
-  model: ModelPrivate,
+  model: _Model,
   fromAtom: Atom,
-  toAtoms: Atom[],
+  toAtoms: Readonly<Atom[]>,
   extend: boolean,
   direction: 'up' | 'down'
 ) {
+  // If prompting mode, filter toAtoms for ID's placeholders
+  const hasEditablePrompts = model.mathfield.hasEditablePrompts;
+  const editableAtoms = !hasEditablePrompts
+    ? toAtoms
+    : toAtoms.filter((a) => a.type === 'prompt' && !a.captureSelection);
+
   // calculate best atom to put cursor at based on real x coordinate
   const fromX = getLocalDOMRect(model.mathfield.getHTMLElement(fromAtom)).right;
-  const targetSelection = model.offsetOf(
-    getClosestAtomToXPosition(model.mathfield, toAtoms, fromX)
-  );
+  const targetSelection =
+    model.offsetOf(
+      getClosestAtomToXPosition(model.mathfield, editableAtoms, fromX)
+    ) - (hasEditablePrompts ? 1 : 0); // jump inside prompt
 
   if (extend) {
     const [left, right] = model.selection.ranges[0];
@@ -447,13 +466,28 @@ function moveToClosestAtomVertically(
   model.announce(`move ${direction}`);
 }
 
-function moveUpward(
-  model: ModelPrivate,
-  options?: { extend: boolean }
-): boolean {
+function moveUpward(model: _Model, options?: { extend: boolean }): boolean {
   const extend = options?.extend ?? false;
 
   if (!extend) model.collapseSelection('backward');
+
+  // Callback when there is nowhere to move
+  const handleDeadEnd = () => {
+    let success = true; // True => perform default handling
+    if (!model.silenceNotifications) {
+      success =
+        model.mathfield.host?.dispatchEvent(
+          new CustomEvent('move-out', {
+            detail: { direction: 'upward' },
+            cancelable: true,
+            bubbles: true,
+            composed: true,
+          })
+        ) ?? true;
+    }
+    model.announce(success ? 'line' : 'plonk');
+    return success;
+  };
 
   // Find a target branch
   // This is to handle the case: `\frac{x}{\sqrt{y}}`. If we're at `y`
@@ -464,50 +498,68 @@ function moveUpward(
 
   while (
     atom &&
-    atom.treeBranch !== 'below' &&
-    !(Array.isArray(atom.treeBranch) && atom.parent instanceof ArrayAtom)
+    atom.parentBranch !== 'below' &&
+    !(Array.isArray(atom.parentBranch) && atom.parent instanceof ArrayAtom)
   )
     atom = atom.parent!;
 
   // handle navigating through matrices and such
-  if (Array.isArray(atom?.treeBranch) && atom.parent instanceof ArrayAtom) {
+  if (Array.isArray(atom?.parentBranch) && atom.parent instanceof ArrayAtom) {
     const arrayAtom = atom.parent;
-    const rowAbove = Math.max(0, atom.treeBranch[0] - 1);
-    const aboveCell = arrayAtom.array[rowAbove][atom.treeBranch[1]]!;
+    if (atom.parentBranch[0] < 1) return handleDeadEnd();
+
+    const rowAbove = atom.parentBranch[0] - 1;
+    const aboveCell = arrayAtom.array[rowAbove][atom.parentBranch[1]]!;
+
+    // Check if the cell has any editable regions
+    const cellHasPrompt = aboveCell.some(
+      (a: PromptAtom) => a.type === 'prompt' && !a.captureSelection
+    );
+    if (!cellHasPrompt && model.mathfield.hasEditablePrompts)
+      return handleDeadEnd();
+
     moveToClosestAtomVertically(model, baseAtom, aboveCell, extend, 'up');
   } else if (atom) {
     // If branch doesn't exist, create it
     const branch =
       atom.parent!.branch('above') ?? atom.parent!.createBranch('above');
 
+    // Check if the branch has any editable regions
+    const branchHasPrompt = branch.some(
+      (a: PromptAtom) => a.type === 'prompt' && a.placeholderId
+    );
+    if (!branchHasPrompt && model.mathfield.hasEditablePrompts)
+      return handleDeadEnd();
+
     moveToClosestAtomVertically(model, baseAtom, branch, extend, 'up');
-  } else {
-    let result = true; // True => perform default handling
-    if (!model.suppressChangeNotifications) {
-      result =
+  } else return handleDeadEnd();
+
+  model.mathfield.stopCoalescingUndo();
+
+  return true;
+}
+
+function moveDownward(model: _Model, options?: { extend: boolean }): boolean {
+  const extend = options?.extend ?? false;
+
+  if (!extend) model.collapseSelection('forward');
+  // Callback when there is nowhere to move
+  const handleDeadEnd = () => {
+    let success = true; // True => perform default handling
+    if (!model.silenceNotifications) {
+      success =
         model.mathfield.host?.dispatchEvent(
           new CustomEvent('move-out', {
-            detail: { direction: 'upward' },
+            detail: { direction: 'downward' },
             cancelable: true,
             bubbles: true,
             composed: true,
           })
         ) ?? true;
     }
-    model.announce(result ? 'plonk' : 'line');
-    return result;
-  }
-
-  return true;
-}
-
-function moveDownward(
-  model: ModelPrivate,
-  options?: { extend: boolean }
-): boolean {
-  const extend = options?.extend ?? false;
-
-  if (!extend) model.collapseSelection('forward');
+    model.announce(success ? 'line' : 'plonk');
+    return success;
+  };
 
   // Find a target branch
   // This is to handle the case: `\frac{\sqrt{x}}{y}`. If we're at `x`
@@ -518,42 +570,38 @@ function moveDownward(
 
   while (
     atom &&
-    atom.treeBranch !== 'above' &&
-    !(Array.isArray(atom.treeBranch) && atom.parent instanceof ArrayAtom)
+    atom.parentBranch !== 'above' &&
+    !(Array.isArray(atom.parentBranch) && atom.parent instanceof ArrayAtom)
   )
     atom = atom.parent!;
 
   // handle navigating through matrices and such
-  if (Array.isArray(atom?.treeBranch) && atom.parent instanceof ArrayAtom) {
+  if (Array.isArray(atom?.parentBranch) && atom.parent instanceof ArrayAtom) {
     const arrayAtom = atom.parent;
-    const rowBelow = Math.min(
-      arrayAtom.array.length - 1,
-      atom.treeBranch[0] + 1
+    if (atom.parentBranch[0] + 1 > arrayAtom.array.length - 1)
+      return handleDeadEnd();
+
+    const rowBelow = atom.parentBranch[0] + 1;
+    const belowCell = arrayAtom.array[rowBelow][atom.parentBranch[1]]!;
+
+    // Check if the cell has any editable regions
+    const cellHasPrompt = belowCell.some(
+      (a: PromptAtom) => a.type === 'prompt' && !a.captureSelection
     );
-    const belowCell = arrayAtom.array[rowBelow][atom.treeBranch[1]]!;
+    if (!cellHasPrompt && model.mathfield.hasEditablePrompts)
+      return handleDeadEnd();
+
     moveToClosestAtomVertically(model, baseAtom, belowCell, extend, 'down');
   } else if (atom) {
     // If branch doesn't exist, create it
     const branch =
       atom.parent!.branch('below') ?? atom.parent!.createBranch('below');
-
+    // Check if the branch has any editable regions
+    const branchHasPrompt = branch.some((a: PromptAtom) => a.type === 'prompt');
+    if (!branchHasPrompt && model.mathfield.hasEditablePrompts)
+      return handleDeadEnd();
     moveToClosestAtomVertically(model, baseAtom, branch, extend, 'down');
-  } else {
-    let result = true; // `true` => perform default handling
-    if (!model.suppressChangeNotifications) {
-      result =
-        model.mathfield.host?.dispatchEvent(
-          new CustomEvent('move-out', {
-            detail: { direction: 'downward' },
-            cancelable: true,
-            bubbles: true,
-            composed: true,
-          })
-        ) ?? true;
-    }
-    model.announce(result ? 'plonk' : 'line');
-    return result;
-  }
+  } else return handleDeadEnd();
 
   return true;
 }

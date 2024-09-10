@@ -5,28 +5,25 @@
 <h3><strong>MathLive</strong></h3>
 <h1>A Web Component for Math Input</h1>
 
-<img src="assets/screenshots/mathlive-demo.png">
-
-[![Maintenance](https://img.shields.io/maintenance/yes/2022.svg)]()
+[![Maintenance](https://img.shields.io/maintenance/yes/2024.svg)]()
 [![GitHub license](https://img.shields.io/badge/license-MIT-brightgreen.svg)](https://raw.githubusercontent.com/arnog/mathlive/master/LICENSE.txt)
-[![Build Status](https://travis-ci.org/arnog/mathlive.svg?branch=master)](https://travis-ci.org/arnog/mathlive)
 
-- [x] A **Web Component**, easy to integrate in your project, regardless of the
-      framework you use, or even if you just use plain JavaScript
-- [x] Edit **math formulas** with an easy to use interface
-- [x] Beautiful, **TeX-quality** typesetting: over 800 LaTeX commands built-in
-- [x] Designed for **mobile devices** with an extensive set of **virtual
-      keyboards** for math input
-- [x] Compatible with **screen readers**, and includes custom math-to-speech
-      support for improved **accessibility**
-- [x] Output to **LaTeX**, **MathML** and **MathJSON** (Abstract Syntax Tree)
-      formats
-- [x] And it is easy to **customize** to your needs!
+MathLive is a powerful web component that provides an easy-to-use interface for
+editing math formulas.
 
-Reference documentation and guides at
-[cortexjs.io/mathlive](https://cortexjs.io/mathlive/).
+With over 800 **built-in LaTeX commands**, MathLive renders beautiful, 
+**TeX-quality typesetting**. 
 
-Try it at [cortexjs.io/mathlive/demo/](https://cortexjs.io/mathlive/demo/).
+It's designed for **mobile devices** with an extensive set of virtual keyboards 
+for math input, and is compatible with screen readers, including custom 
+math-to-speech support for improved accessibility. 
+
+MathLive outputs to LaTeX, MathML, ASCIIMath, and MathJSON formats, making it 
+incredibly versatile. 
+
+And the best part? It's easy to customize to your needs!
+
+<img src="assets/screenshots/mathlive-demo.png">
 
 <table align="center" >
     <tr>
@@ -50,53 +47,50 @@ Try it at [cortexjs.io/mathlive/demo/](https://cortexjs.io/mathlive/demo/).
     </tr>
 </table>
 
-## Using MathLive
+## 🚀 Getting Started
 
-To add a mathfield element to your page use a `<math-field>` tag.
+Using MathLive is easy! Simply add a `<math-field>` tag to your page. It
+initializes automatically and works just like a `<textarea>` or `<button>`
+element. You can manipulate the mathfield using methods of the element and
+listen for events to be notified when its internal state changes.
 
-It works just like a `<textarea>` or `<button>`. You can manipulate the
-mathfield using methods of the element and listen for events to be notified when
-its internal state changes.
+`npm install mathlive`
+
+```javascript
+import 'mathlive';
+```
 
 ```html
 <!DOCTYPE html>
 <html lang="en-US">
   <body>
     <math-field>f(x)=</math-field>
-    <script src="https://unpkg.com/mathlive"></script>
   </body>
 </html>
 ```
 
-## Documentation
+You can also add it using CDN
+```html
+<head>
+    <script src="https://unpkg.com/mathlive"></script>
+</head>
+```
 
-<dl>
-  <dt><a href="https://cortexjs.io/mathlive/guides/getting-started/">Quick Start</a></dt>
-  <dd>Quick introduction to using MathLive in your project</dd>  
-  <dt><a href="https://cortexjs.io/mathlive/guides/interacting">Interact with a mathfield</a></dt>
-  <dd>Receive input and change the value of a mathfield</dd>
-  <dt><a href="https://cortexjs.io/mathlive/guides/customizing">Customize a mathfield</a></dt>
-  <dd>Adapt the behavior and appearance of a mathfield to your needs</dd>
-  <dt><a href="https://cortexjs.io/mathlive/guides/commands">Execute commands</a></dt>
-  <dd>Send editing commands to a mathfield</dd>
-  <dt><a href="https://cortexjs.io/mathlive/guides/macros">Define custom LaTeX macros</a></dt>
-  <dd>Extend the LaTeX commands supported</dd>
-  <dt><a href="https://cortexjs.io/mathlive/guides/shortcuts">Manage inline and keyboard shortcuts</a></dt>
-  <dd>Add or modify editing keyboard shortcuts</dd>
-  <dt><a href="https://cortexjs.io/mathlive/guides/speech">Control speech output</a></dt>
-  <dd>A mathfield can provide speech feedback to interact with it.</dd>
-  <dt><a href="https://cortexjs.io/mathlive/guides/static">Display static math formulas</a></dt>
-  <dd>Display non-editable math formulas in your page</dd>
-  <dt><a href="https://cortexjs.io/mathlive/guides/virtual-keyboards">Define custom virtual keyboards</a></dt>
-  <dd>Customize or create new virtual (on-screen) keyboards</dd>
-  <hr>
-  <dt><a href="https://cortexjs.io/mathlive/guides/integration/">Getting Started</a></dt>
-  <dd>Everything you need to integrate the MathLive library to your project</dd>  
-  <dt><a href="https://cortexjs.io/docs/mathlive">MathLive SDK</a></dt>
-  <dd>Reference documentation of the MathLive API</dd>
-</dl>
+Check documentation for [React](https://cortexjs.io/mathlive/guides/react/) and
+[interaction with Mathfield](https://cortexjs.io/mathlive/guides/interacting/). 
 
-## Related Projects
+## 📖 Documentation
+
+MathLive has an extensive set of documentation to help you get started,
+including guides on interacting with a mathfield, customizing it, executing
+commands, defining custom LaTeX macros, managing inline and keyboard shortcuts,
+controlling speech output, and displaying static math formulas. You can find all
+of these guides on the [CortexJS.io website](https://cortexjs.io/mathlive/).
+
+In addition to the guides, you can also find reference documentation of the
+MathLive API on the [MathLive SDK page](https://cortexjs.io/docs/mathlive).
+
+## ⋯ Related Projects
 
 <dl>
   <dt><a href="https://cortexjs.io/math-json">MathJSON</a> (on <a href="https://github.com/cortex-js/math-json">GitHub</a>)</dt>
@@ -107,11 +101,12 @@ its internal state changes.
   <dd>Cortex is a programming language for scientific computing</dd>  
 </dl>
 
-## Contact Us
+## 💬 Contact Us
 
-- Join our [Gitter community](https://gitter.im/cortex-js/community)
-- Drop a line to arno@arno.org
+- Chat with the [CortexJS Assistant](https://chat.openai.com/g/g-8YgEfR7ig-cortexjs-assistant)
+- Join our [Discord server](https://discord.gg/yhmvVeJ4Hd)
+- Drop a line to [arno@arno.org](arno@arno.org)
 
-## License
+## 📃 License
 
 This project is licensed under the [MIT License](LICENSE.txt).

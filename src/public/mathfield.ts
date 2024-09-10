@@ -1,6 +1,5 @@
-import { Selector } from './commands';
-import { CombinedVirtualKeyboardOptions, MathfieldOptions } from './options';
-import { ParseMode, Style } from './core';
+import type { Selector } from './commands';
+import type { ParseMode, Style } from './core-types';
 
 /**
  *
@@ -10,20 +9,31 @@ import { ParseMode, Style } from './core';
 | `"latex"`             | LaTeX rendering of the content, with LaTeX macros not expanded. |
 | `"latex-expanded"`    | All macros are recursively expanded to their definition. |
 | `"latex-unstyled"`    | Styling (background color, color) is ignored |
-| `"math-json"`         | A MathJSON abstract syntax tree, as an object literal formated as a JSON string. |
+| `"latex-without-placeholders"`    | Replace `\placeholder` commands with their body |
+| `"math-json"`         | A MathJSON abstract syntax tree, as an object literal formated as a JSON string. Note: you must import the CortexJS Compute Engine to obtain a result. |
 | `"math-ml"`           | A string of MathML markup. |
+' `"plain-text"`        | A plain text rendering of the content. |
 | `"spoken"`            | Spoken text rendering, using the default format defined in config, which could be either text or SSML markup. |
 | `"spoken-text"`       | A plain spoken text rendering of the content. |
 | `"spoken-ssml"`       | A SSML (Speech Synthesis Markup Language) version of the content, which can be used with some text-to-speech engines such as AWS. |
 | `"spoken-ssml-with-highlighting"`| Like `"spoken-ssml"` but with additional annotations necessary for synchronized highlighting (read aloud). |
-*/
+
+   * To use the`"math-json"` format the Compute Engine library must be loaded. Use for example:
+   *
+```js
+import "https://unpkg.com/@cortex-js/compute-engine?module";
+```
+   *
+   */
 export type OutputFormat =
   | 'ascii-math'
   | 'latex'
   | 'latex-expanded'
   | 'latex-unstyled'
+  | 'latex-without-placeholders'
   | 'math-json'
   | 'math-ml'
+  | 'plain-text'
   | 'spoken'
   | 'spoken-text'
   | 'spoken-ssml'
@@ -35,10 +45,11 @@ export type InsertOptions = {
   /**
      * The format of the input string:
      *
-    | <!-- -->    | <!-- -->    |
-    |:------------|:------------|
-    |`"auto"`| The string is LaTeX fragment or command) (default)|
-    |`"latex"`| The string is a LaTeX fragment|
+
+| | |
+|:------------|:------------|
+|`"auto"`| The string is LaTeX fragment or command) (default)|
+|`"latex"`| The string is a LaTeX fragment|
     *
     */
   format?: OutputFormat | 'auto';
@@ -50,17 +61,17 @@ export type InsertOptions = {
   /**
      * Describes where the selection
      * will be after the insertion:
-     | <!-- -->    | <!-- -->    |
-    | :---------- | :---------- |
-    |`"placeholder"`| The selection will be the first available placeholder in the text that has been inserted (default)|
-    |`"after"`| The selection will be an insertion point after the inserted text|
-    |`"before"`| The selection will be an insertion point before the inserted text|
-    |`"item"`| The inserted text will be selected|
+
+| | |
+| :---------- | :---------- |
+|`"placeholder"`| The selection will be the first available placeholder in the text that has been inserted (default)|
+|`"after"`| The selection will be an insertion point after the inserted text|
+|`"before"`| The selection will be an insertion point before the inserted text|
+|`"item"`| The inserted text will be selected|
     */
   selectionMode?: 'placeholder' | 'after' | 'before' | 'item';
 
-  suppressChangeNotifications?: boolean;
-  style?: Style;
+  silenceNotifications?: boolean;
   /** If `true`, the mathfield will be focused after
    * the insertion
    */
@@ -72,17 +83,45 @@ export type InsertOptions = {
    * insertion point is visible
    */
   scrollIntoView?: boolean;
-  /** If `true`, the style after the insertion
-   * is the same as the style before. If false, the style after the
-   * insertion is the style of the last inserted atom.
-   */
-  resetStyle?: boolean;
+
+  style?: Style;
 };
 
 export type ApplyStyleOptions = {
   range?: Range;
   operation?: 'set' | 'toggle';
-  suppressChangeNotifications?: boolean;
+  silenceNotifications?: boolean;
+};
+
+/**
+ * Some additional information about an element in the formula
+ */
+
+export type ElementInfo = {
+  /** The depth in the expression tree. 0 for top-level elements */
+  depth?: number;
+
+  /** The bounding box of the element */
+  bounds?: DOMRect;
+
+  /** id associated with this element or its ancestor, set with `\htmlId` or 
+     `\cssId`   
+  */
+  id?: string;
+
+  /** HTML attributes associated with element or its ancestores, set with
+   * `\htmlData`
+   */
+  data?: Record<string, string | undefined>;
+
+  /** The mode (math, text or LaTeX) */
+  mode?: ParseMode;
+
+  /** A LaTeX representation of the element */
+  latex?: string;
+
+  /** The style (color, weight, variant, etc...) of this element. */
+  style?: Style;
 };
 
 /**
@@ -105,7 +144,7 @@ export type Offset = number;
  * a normalized range.
  *
  * **See Also**
- * * [[`Selection`]]
+ * * {@linkcode Selection}
  */
 
 export type Range = [start: Offset, end: Offset];
@@ -126,51 +165,17 @@ export type Range = [start: Offset, end: Offset];
  * the end of the range.
  *
  * **See Also**
- * * [[`Range`]]
+ * * {@linkcode Range}
  */
 export type Selection = {
   ranges: Range[];
   direction?: 'forward' | 'backward' | 'none';
 };
 
-/**
- * This interface is implemented by:
- * - `VirtualKeyboard`
- * - `VirtualKeyboardDelegate` (used when the virtual keyboard is shared amongst
- * mathfield instances)
- * - `RemoteVirtualKeyboard` (the shared virtual keyboard instance)
- */
-export interface VirtualKeyboardInterface {
-  visible: boolean;
-  height: number;
-  /** Called once when the keyboard is created */
-  create(): void;
-  /** After calling dispose() the Virtual Keyboard is no longer valid and
-   * cannot be brought back. Use disable() for temporarily deactivating the
-   * keyboard. */
-  dispose(): void;
-  executeCommand(command: string | [string, ...any[]]): boolean;
-  focusMathfield(): void;
-  blurMathfield(): void;
-  enable(): void;
-  disable(): void;
-  stateChanged(): void;
-  setOptions(options: CombinedVirtualKeyboardOptions): void;
-}
-
+/** @internal */
 export interface Mathfield {
-  mode: ParseMode;
-
-  getOptions(): MathfieldOptions;
-  getOptions<K extends keyof MathfieldOptions>(
-    keys: K[]
-  ): Pick<MathfieldOptions, K>;
-  getOption<K extends keyof MathfieldOptions>(key: K): MathfieldOptions[K];
-
-  setOptions(options: Partial<MathfieldOptions>): void;
-
   /**
-   * Execute a [[`Commands`|command]] defined by a selector.
+   * Execute a {@linkcode Commands|command} defined by a selector.
    * ```javascript
    * mfe.executeCommand('add-column-after');
    * mfe.executeCommand(['switch-mode', 'math']);
@@ -192,11 +197,16 @@ export interface Mathfield {
   /**
    * Return a textual representation of the content of the mathfield.
    *
-   * @param format - The format of the result
+   * @param format - The format of the result. If using `math-json`
+   * the Compute Engine library must be loaded, for example with:
+   *
+   * ```js
+import "https://unpkg.com/@cortex-js/compute-engine?module";
+```
+   *
    *
    * **Default:** `"latex"`
    *
-   * @category Accessing the Content
    */
   getValue(format?: OutputFormat): string;
   /** Return the value of the mathfield from `start` to `end` */
@@ -216,7 +226,6 @@ export interface Mathfield {
    * Set the content of the mathfield to the text interpreted as a
    * LaTeX expression.
    *
-   * @category Accessing the Content
    */
   setValue(latex?: string, options?: InsertOptions): void;
 
@@ -229,7 +238,6 @@ export interface Mathfield {
    * After the insertion, the selection will be set according to the
    * `options.selectionMode`.
    *
-   * @category Changing the Content
    */
 
   insert(s: string, options?: InsertOptions): boolean;
@@ -238,18 +246,10 @@ export interface Mathfield {
    * Return true if the mathfield is currently focused (responds to keyboard
    * input).
    *
-   * @category Focus
-   *
    */
   hasFocus(): boolean;
 
-  /**
-   * @category Focus
-   */
   focus?(): void;
-  /**
-   * @category Focus
-   */
   blur?(): void;
 
   /**
@@ -276,24 +276,18 @@ export interface Mathfield {
   applyStyle(style: Style, options?: ApplyStyleOptions): void;
 
   /**
-   * The bottom location of the caret (insertion point) in viewport
-   * coordinates.
-   *
-   * See also [[`setCaretPoint`]]
-   * @category Selection
+   * Return the content of the `\placeholder{}` command with the `placeholderId`
    */
-  getCaretPoint?(): { x: number; y: number } | null;
-  setCaretPoint(x: number, y: number): boolean;
+  getPromptValue(placeholderId: string, format?: OutputFormat): string;
 
-  /**
-   * Return a nested mathfield element that match the provided `placeholderId`
-   * @param placeholderId
-   */
-  getPlaceholderField(placeholderId: string): Mathfield | undefined;
-
-  virtualKeyboardState: 'visible' | 'hidden';
+  getPrompts(filter?: {
+    id?: string;
+    locked?: boolean;
+    correctness?: 'correct' | 'incorrect' | 'undefined';
+  }): string[];
 }
 
+/** @internal */
 export interface Model {
   readonly mathfield: Mathfield;
 }
